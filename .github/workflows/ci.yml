@@ -1,0 +1,46 @@
+name: CI Tests
+
+on:
+  workflow_run:
+    workflows: ["Deploy Documentation"]
+    types:
+      - completed
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test-matrix:
+    name: 'Test Python ${{ matrix.python-version }}'
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'push' || github.event_name == 'pull_request' }}
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Install Hatch
+      run: |
+        python -m pip install --upgrade pip
+        pip install hatch
+    
+    - name: Run type checking
+      run: |
+        hatch run dev:mypy PACKAGE_NAME
+        
+    - name: Run tests  
+      run: |
+        hatch test
+        
+    - name: Build package
+      run: |
+        hatch build
+        

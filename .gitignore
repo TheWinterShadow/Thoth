@@ -1,0 +1,50 @@
+# Credentials and secrets
+/key.json
+auth.aws
+*.pem
+*.key
+
+# Virtual environments
+.env/
+.venv/
+venv/
+env/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+docs/build/
+
+# Python cache
+**/__pycache__/**
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Coverage
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Reports and logs
+reports/
+*.log
+
+# Hatch
+.hatch/
+
+# Type checking reports
+mypy-report/
