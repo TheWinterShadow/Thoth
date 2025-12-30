@@ -34,7 +34,7 @@ jobs:
     
     - name: Run type checking
       run: |
-        hatch run dev:mypy PACKAGE_NAME
+        hatch run dev:mypy thoth
         
     - name: Run tests  
       run: |

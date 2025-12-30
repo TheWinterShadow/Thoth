@@ -6,7 +6,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "PACKAGE_NAME"
+name = "Thoth"
 dynamic = ["version"]
 description = "DESCRIPTION"
 readme = "README.md"
@@ -35,11 +35,11 @@ classifiers = [
 ]
 
 [project.urls]
-Documentation = "https://thewintershadow.github.io/PACKAGE_NAME/"
-Homepage = "https://github.com/TheWinterShadow/PACKAGE_NAME"
-Repository = "https://github.com/TheWinterShadow/PACKAGE_NAME"
-Issues = "https://github.com/TheWinterShadow/PACKAGE_NAME/issues"
-Changelog = "https://github.com/TheWinterShadow/PACKAGE_NAME/blob/main/CHANGELOG.md"
+Documentation = "https://thewintershadow.github.io/Thoth/"
+Homepage = "https://github.com/TheWinterShadow/Thoth"
+Repository = "https://github.com/TheWinterShadow/Thoth"
+Issues = "https://github.com/TheWinterShadow/Thoth/issues"
+Changelog = "https://github.com/TheWinterShadow/Thoth/blob/main/CHANGELOG.md"
 [project.optional-dependencies]
 
 # Development dependencies
@@ -78,17 +78,17 @@ all = [
 # HATCH CONFIGURATION
 # ==============================================================================
 [tool.hatch.version]
-path = "PACKAGE_NAME/__about__.py"
+path = "Thoth/__about__.py"
 
 [tool.hatch.build]
 directory = "dist"
 
 [tool.hatch.build.targets.wheel]
-packages = ["PACKAGE_NAME"]
+packages = ["Thoth"]
 
 [tool.hatch.build.targets.sdist]
 include = [
-  "PACKAGE_NAME/",
+  "Thoth/",
   "README.md",
   "LICENSE.txt",
 ]
@@ -131,9 +131,9 @@ dependencies = [
 
 [tool.hatch.envs.dev.scripts]
 # Type checking scripts
-typecheck = "mypy PACKAGE_NAME"
-typecheck-strict = "mypy --strict PACKAGE_NAME"
-typecheck-report = "mypy --html-report mypy-report PACKAGE_NAME"
+typecheck = "mypy thoth"
+typecheck-strict = "mypy --strict thoth"
+typecheck-report = "mypy --html-report mypy-report thoth"
 # Documentation scripts  
 docs = "sphinx-build -b html docs/source docs/build"
 docs-clean = "sphinx-build -b html -E docs/source docs/build"
@@ -178,14 +178,14 @@ isort = "python -m isort {args}"
 black = "python -m black {args}"
 flake8 = "python -m flake8 {args}"
 mypy = "python -m mypy --exclude 'docs' {args}"
-
+bandit = "python -m bandit -r Thoth {args}"
 # Build scripts
 build = "python -m build"
 clean = "hatch clean"
 pre-build = [
-  "isort PACKAGE_NAME tests",
-  "black --check PACKAGE_NAME tests",
-  "mypy PACKAGE_NAME",
+  "isort thoth tests",
+  "black --check thoth tests",
+  "mypy thoth",
 ]
 
 [[tool.hatch.envs.all.matrix]]
@@ -197,16 +197,16 @@ python = ["3.9", "3.10", "3.11", "3.12", "3.13"]
 
 # Coverage configuration
 [tool.coverage.run]
-source_pkgs = ["PACKAGE_NAME", "tests"]
+source_pkgs = ["thoth", "tests"]
 branch = true
 parallel = true
 omit = [
-  "PACKAGE_NAME/__about__.py",
+  "thoth/__about__.py",
 ]
 
 [tool.coverage.paths]
-PACKAGE_NAME = ["PACKAGE_NAME", "*/PACKAGE_NAME/PACKAGE_NAME"]
-tests = ["tests", "*/PACKAGE_NAME/tests"]
+thoth = ["thoth", "*/thoth/thoth"]
+tests = ["tests", "*/thoth/tests"]
 
 [tool.coverage.report]
 exclude_lines = [
