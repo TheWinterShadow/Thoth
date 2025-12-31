@@ -31,7 +31,7 @@ jobs:
       run: pip install hatch
       
     - name: Build documentation
-      run: hatch run dev:docs
+      run: hatch run docs:build
       
     - name: Workflow Summary
       run: |

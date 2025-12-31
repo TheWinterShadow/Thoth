@@ -1,8 +1,8 @@
-# Repository settings for Lock & Key
+# Repository settings for Thoth
 
-name: PACKAGE_NAME
-description: "DESCRIPTION"
-homepage: "https://thewintershadow.github.io/PACKAGE_NAME/"
+name: Thoth
+description: "Personal MCP Server"
+homepage: "https://thewintershadow.github.io/Thoth/"
 topics:
   - python
 

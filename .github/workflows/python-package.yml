@@ -59,15 +59,15 @@ jobs:
       - name: Run isort
         run: |
           echo "Running isort..."
-          hatch run dev:isort ./PACKAGE_NAME --check-only --diff
+          hatch run dev:isort ./thoth --check-only --diff
       - name: Run black
         run: |
           echo "Running black..."
-          hatch run dev:black ./PACKAGE_NAME --check --diff
+          hatch run dev:black ./thoth --check --diff
       - name: Run flake8
         run: |
           echo "Running flake8..."
-          hatch run dev:flake8 ./PACKAGE_NAME
+          hatch run dev:flake8 ./thoth
   mypyChecks:
     name: 'Run MyPy Checks'
     runs-on: ubuntu-latest
@@ -92,7 +92,7 @@ jobs:
       - name: Run mypy
         run: |
           echo "Running mypy..."
-          hatch run dev:mypy ./PACKAGE_NAME
+          hatch run dev:mypy ./thoth
 
   unitTests:
     name: 'Run Unit Tests'
