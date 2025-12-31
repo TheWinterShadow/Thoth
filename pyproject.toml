@@ -78,17 +78,17 @@ all = [
 # HATCH CONFIGURATION
 # ==============================================================================
 [tool.hatch.version]
-path = "Thoth/__about__.py"
+path = "thoth/__about__.py"
 
 [tool.hatch.build]
 directory = "dist"
 
 [tool.hatch.build.targets.wheel]
-packages = ["Thoth"]
+packages = ["thoth"]
 
 [tool.hatch.build.targets.sdist]
 include = [
-  "Thoth/",
+  "thoth/",
   "README.md",
   "LICENSE.txt",
 ]
@@ -178,7 +178,7 @@ isort = "python -m isort {args}"
 black = "python -m black {args}"
 flake8 = "python -m flake8 {args}"
 mypy = "python -m mypy --exclude 'docs' {args}"
-bandit = "python -m bandit -r Thoth {args}"
+bandit = "python -m bandit -r thoth {args}"
 # Build scripts
 build = "python -m build"
 clean = "hatch clean"
