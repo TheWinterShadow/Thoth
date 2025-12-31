@@ -6,7 +6,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "Thoth"
+name = "thoth"
 dynamic = ["version"]
 description = "DESCRIPTION"
 readme = "README.md"
