@@ -129,15 +129,18 @@ dependencies = [
   "bandit",
 ]
 
+[tool.hatch.envs.docs]
+dependencies = [
+  "sphinx",
+  "furo", 
+  "myst-parser",
+]
+
 [tool.hatch.envs.dev.scripts]
 # Type checking scripts
 typecheck = "mypy thoth"
 typecheck-strict = "mypy --strict thoth"
 typecheck-report = "mypy --html-report mypy-report thoth"
-# Documentation scripts  
-docs = "sphinx-build -b html docs/source docs/build"
-docs-clean = "sphinx-build -b html -E docs/source docs/build"
-docs-serve = "python -m http.server 8000 --directory docs/build"
 
 [tool.hatch.envs.hatch-test]
 dependencies = [
@@ -154,12 +157,27 @@ template = "hatch-test"
 # HATCH SCRIPTS
 # ==============================================================================
 [tool.hatch.envs.default.scripts]
-# Application scripts
+# Format code
+format = [
+  "isort thoth tests",
+  "black thoth tests",
+]
 
-# Documentation scripts
-docs = "sphinx-build -b html docs/source docs/build"
-docs-clean = "sphinx-build -b html -E docs/source docs/build"
-docs-serve = "python -m http.server 8000 --directory docs/build"
+# Check formatting
+format-check = [
+  "isort --check thoth tests",
+  "black --check thoth tests",
+  "flake8 thoth tests",
+]
+
+# Type checking
+typecheck = "mypy --exclude 'docs' thoth"
+# Full quality check pipeline
+check = [
+  "format",
+  "format-check", 
+  "typecheck",
+]
 
 # Testing scripts
 test = "pytest {args:tests}"
@@ -169,24 +187,25 @@ cov-report = [
   "coverage report",
 ]
 cov = [
-  "test-cov",
+  "test-cov", 
   "cov-report",
 ]
 
-# Development scripts
-isort = "python -m isort {args}"
-black = "python -m black {args}"
-flake8 = "python -m flake8 {args}"
-mypy = "python -m mypy --exclude 'docs' {args}"
-bandit = "python -m bandit -r thoth {args}"
-# Build scripts
-build = "python -m build"
-clean = "hatch clean"
+# Build pipeline
 pre-build = [
-  "isort thoth tests",
-  "black --check thoth tests",
-  "mypy thoth",
+  "format",
+  "format-check",
+  "typecheck",
 ]
+build = "hatch build"
+clean = "hatch clean"
+
+[tool.hatch.envs.docs.scripts]
+build = "sphinx-build -b html docs/source docs/build"
+clean = "sphinx-build -b html -E docs/source docs/build"
+serve = "python -m http.server 8000 --directory docs/build"
+
+
 
 [[tool.hatch.envs.all.matrix]]
 python = ["3.9", "3.10", "3.11", "3.12", "3.13"]
