@@ -90,7 +90,7 @@ packages = ["thoth"]
 include = [
   "thoth/",
   "README.md",
-  "LICENSE.txt",
+  "LICENSE",
 ]
 exclude = [
   "tests/",
