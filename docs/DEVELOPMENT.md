@@ -425,10 +425,11 @@ mypy thoth/utils/text.py
 ```bash
 # Auto-format code
 black thoth/ tests/
-isort thoth/ tests/
+ruff check --fix thoth/ tests/
 
 # Check what would change without applying
 black --check thoth/ tests/
+ruff check thoth/ tests/
 ```
 
 ### Getting Help
