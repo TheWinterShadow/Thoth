@@ -45,12 +45,12 @@ Changelog = "https://github.com/TheWinterShadow/Thoth/blob/main/CHANGELOG.md"
 # Development dependencies
 dev = [
   "black>=23.0.0",
-  "isort>=5.12.0",
-  "flake8>=6.0.0",
+  "ruff>=0.1.0",
   "mypy>=1.0.0",
   "pytest>=7.0.0",
   "pytest-cov>=4.0.0",
   "bandit>=1.7.0",
+  "pre-commit>=3.0.0",
 ]
 
 # Documentation dependencies
@@ -63,12 +63,12 @@ docs = [
 # All optional dependencies combined
 all = [
   "black>=23.0.0",
-  "isort>=5.12.0",
-  "flake8>=6.0.0",
+  "ruff>=0.1.0",
   "mypy>=1.0.0",
   "pytest>=7.0.0",
   "pytest-cov>=4.0.0",
   "bandit>=1.7.0",
+  "pre-commit>=3.0.0",
   "sphinx>=5.0.0",
   "furo>=2.0.0", 
   "myst-parser>=2.0.0",
@@ -118,16 +118,39 @@ dependencies = [
 
   # Code formatting and linting
   "black",
-  "flake8",
-  "flake8-pyproject",
-  "isort",
+  "ruff",
   "mypy",
+  "pre-commit",
   # Testing
   "pytest",
   "coverage[toml]>=6.5",
   # Security
   "bandit",
 ]
+
+[tool.hatch.envs.lint]
+dependencies = [
+  "black",
+  "ruff",
+  "mypy",
+  "bandit",
+  "pre-commit",
+]
+
+[tool.hatch.envs.lint.scripts]
+all = [
+  "ruff check --fix .",
+  "black .",
+  "mypy thoth",
+  "bandit -r thoth",
+]
+style = [
+  "ruff check --fix .",
+  "black .",
+]
+typing = "mypy thoth"
+security = "bandit -r thoth"
+precommit = "pre-commit run --all-files"
 
 [tool.hatch.envs.docs]
 dependencies = [
@@ -141,6 +164,11 @@ dependencies = [
 typecheck = "mypy thoth"
 typecheck-strict = "mypy --strict thoth"
 typecheck-report = "mypy --html-report mypy-report thoth"
+
+# Pre-commit management
+precommit-install = "pre-commit install"
+precommit-update = "pre-commit autoupdate"
+precommit-run = "pre-commit run --all-files"
 
 [tool.hatch.envs.hatch-test]
 dependencies = [
@@ -159,24 +187,38 @@ template = "hatch-test"
 [tool.hatch.envs.default.scripts]
 # Format code
 format = [
-  "isort thoth tests",
+  "ruff check --fix thoth tests",
   "black thoth tests",
 ]
 
-# Check formatting
+# Check formatting and linting
 format-check = [
-  "isort --check thoth tests",
   "black --check thoth tests",
-  "flake8 thoth tests",
+  "ruff check thoth tests",
 ]
 
 # Type checking
 typecheck = "mypy --exclude 'docs' thoth"
+
+# Security scanning
+security = "bandit -r thoth"
+
 # Full quality check pipeline
 check = [
   "format",
   "format-check", 
   "typecheck",
+  "security",
+]
+
+# Pre-commit integration
+precommit = "pre-commit run --all-files"
+precommit-install = "pre-commit install"
+
+# Setup development environment
+setup-dev = [
+  "precommit-install",
+  "echo 'Development environment setup complete!'",
 ]
 
 # Testing scripts
@@ -240,14 +282,113 @@ line-length = 88
 target-version = ["py39"]
 include = '\.pyi?$'
 
-[tool.isort]
-profile = "black"
-multi_line_output = 3
-line_length = 88
+# Ruff configuration (replaces isort, flake8, and more)
+[tool.ruff]
+target-version = "py39"
+line-length = 88
 
-# Linting configuration
-[tool.flake8]
-max-line-length = 120
+[tool.ruff.lint]
+# Enable comprehensive rule sets
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "N",      # pep8-naming
+    "D",      # pydocstyle
+    "UP",     # pyupgrade
+    "YTT",    # flake8-2020
+    "BLE",    # flake8-blind-except
+    "B",      # flake8-bugbear
+    "A",      # flake8-builtins
+    "C4",     # flake8-comprehensions
+    "DTZ",    # flake8-datetimez
+    "T10",    # flake8-debugger
+    "EM",     # flake8-errmsg
+    "FA",     # flake8-future-annotations
+    "ISC",    # flake8-implicit-str-concat
+    "ICN",    # flake8-import-conventions
+    "G",      # flake8-logging-format
+    "INP",    # flake8-no-pep420
+    "PIE",    # flake8-pie
+    "T20",    # flake8-print
+    "PYI",    # flake8-pyi
+    "PT",     # flake8-pytest-style
+    "Q",      # flake8-quotes
+    "RSE",    # flake8-raise
+    "RET",    # flake8-return
+    "SLF",    # flake8-self
+    "SLOT",   # flake8-slots
+    "SIM",    # flake8-simplify
+    "TID",    # flake8-tidy-imports
+    "TCH",    # flake8-type-checking
+    "ARG",    # flake8-unused-arguments
+    "PTH",    # flake8-use-pathlib
+    "ERA",    # eradicate
+    "PGH",    # pygrep-hooks
+    "PL",     # pylint
+    "TRY",    # tryceratops
+    "FLY",    # flynt
+    "PERF",   # perflint
+    "RUF",    # ruff-specific rules
+]
+
+# Ignore specific rules that might be too strict for this project
+ignore = [
+    "D100",   # Missing docstring in public module
+    "D104",   # Missing docstring in public package
+    "D203",   # 1 blank line required before class docstring
+    "D213",   # Multi-line docstring summary should start at the second line
+    "PLR0913", # Too many arguments to function call
+    "PLR2004", # Magic value used in comparison
+]
+
+# Allow fix for all enabled rules (when `--fix`) is provided.
+fixable = ["ALL"]
+unfixable = []
+
+# Exclude a variety of commonly ignored directories.
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "venv",
+    "docs",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*" = [
+    "D",      # Don't require docstrings in tests
+    "PLR2004", # Magic values are OK in tests
+    "S101",   # Use of assert is OK in tests
+    "ARG",    # Unused function args are OK in tests
+]
+
+[tool.ruff.lint.pydocstyle]
+# Use Google-style docstrings
+convention = "google"
+
+[tool.ruff.lint.isort]
+# Configure import sorting
+known-first-party = ["thoth"]
+force-sort-within-sections = true
 
 # Type checking configuration
 [tool.mypy]
@@ -262,3 +403,11 @@ ignore_missing_imports = true
 show_error_codes = true
 # Be strict about TYPE_CHECKING imports
 warn_unused_ignores = true
+
+# Security scanning configuration
+[tool.bandit]
+exclude_dirs = ["tests", "docs"]
+skips = ["B101"]  # Skip assert_used test
+
+[tool.bandit.assert_used]
+skips = ["*_test.py", "*/test_*.py"]
