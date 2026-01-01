@@ -1,0 +1,57 @@
+# Pre-commit configuration for Thoth project
+# See https://pre-commit.com for more information
+
+default_stages: [pre-commit]
+minimum_pre_commit_version: '3.0.0'
+
+repos:
+  # Ruff - Fast Python linter and formatter (managed by hatch)
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff-check
+        entry: hatch run lint:ruff check --fix
+        language: system
+        types: [python]
+        require_serial: true
+      - id: ruff-format
+        name: ruff-format  
+        entry: hatch run lint:ruff format
+        language: system
+        types: [python]
+        require_serial: true
+
+  # mypy - Static type checker (managed by hatch)
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: hatch run lint:mypy thoth
+        language: system
+        types: [python]
+        require_serial: true
+        pass_filenames: false
+
+  # Bandit - Security linting (managed by hatch)
+  - repo: local
+    hooks:
+      - id: bandit
+        name: bandit
+        entry: hatch run lint:bandit -r thoth
+        language: system
+        types: [python]
+        require_serial: true
+        pass_filenames: false
+
+# CI configuration
+ci:
+  autofix_commit_msg: |
+    [pre-commit.ci] auto fixes from pre-commit hooks
+
+    for more information, see https://pre-commit.ci
+  autofix_prs: true
+  autoupdate_branch: ''
+  autoupdate_commit_msg: '[pre-commit.ci] pre-commit autoupdate'
+  autoupdate_schedule: weekly
+  skip: []
+  submodules: false
