@@ -449,7 +449,7 @@ Create `.vscode/settings.json`:
 {
     "python.defaultInterpreterPath": "./venv/bin/python",
     "python.linting.enabled": true,
-    "python.linting.flake8Enabled": true,
+    "ruff.lint.enable": true,
     "python.linting.mypyEnabled": true,
     "python.formatting.provider": "black",
     "python.sortImports.args": ["--profile", "black"],
