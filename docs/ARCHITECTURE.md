@@ -193,8 +193,15 @@ disallow_untyped_defs = True
 line-length = 88
 target-version = ['py39']
 
-[tool.isort]
-profile = "black"
+[tool.ruff]
+line-length = 88
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["thoth"]
 ```
 
 ## Future Considerations

@@ -21,16 +21,6 @@ repos:
         types: [python]
         require_serial: true
 
-  # Black - Code formatter (managed by hatch)
-  - repo: local
-    hooks:
-      - id: black
-        name: black
-        entry: hatch run lint:black
-        language: system
-        types: [python]
-        require_serial: true
-
   # mypy - Static type checker (managed by hatch)
   - repo: local
     hooks:
@@ -52,10 +42,6 @@ repos:
         types: [python]
         require_serial: true
         pass_filenames: false
-
-# Global configuration
-default_stages: [pre-commit]
-minimum_pre_commit_version: '3.0.0'
 
 # CI configuration
 ci:

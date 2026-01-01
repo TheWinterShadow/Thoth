@@ -70,7 +70,7 @@ all = [
   "bandit>=1.7.0",
   "pre-commit>=3.0.0",
   "sphinx>=5.0.0",
-  "furo>=2.0.0", 
+  "furo>=2.0.0",
   "myst-parser>=2.0.0",
 ]
 
@@ -408,6 +408,3 @@ warn_unused_ignores = true
 [tool.bandit]
 exclude_dirs = ["tests", "docs"]
 skips = ["B101"]  # Skip assert_used test
-
-[tool.bandit.assert_used]
-skips = ["*_test.py", "*/test_*.py"]
