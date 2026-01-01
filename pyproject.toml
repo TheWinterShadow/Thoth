@@ -238,6 +238,8 @@ pre-build = [
   "format",
   "format-check",
   "typecheck",
+  "check",
+  "precommit",
 ]
 build = "hatch build"
 clean = "hatch clean"

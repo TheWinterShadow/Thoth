@@ -56,18 +56,10 @@ jobs:
       - name: Build the project
         run: |
           hatch build
-      - name: Run isort
+      - name: Run pre-build
         run: |
           echo "Running isort..."
-          hatch run dev:isort ./thoth --check-only --diff
-      - name: Run black
-        run: |
-          echo "Running black..."
-          hatch run dev:black ./thoth --check --diff
-      - name: Run flake8
-        run: |
-          echo "Running flake8..."
-          hatch run dev:flake8 ./thoth
+          hatch run dev:pre-build
   mypyChecks:
     name: 'Run MyPy Checks'
     runs-on: ubuntu-latest

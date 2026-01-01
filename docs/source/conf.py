@@ -14,8 +14,7 @@ sys.path.insert(0, str(Path("../..").resolve()))
 # -- Project information -----------------------------------------------------
 
 project = "Thoth"
-copyright = "2025 TheWinterShadow"
-copyright_text = copyright
+copyright_text = "2025 TheWinterShadow"
 author = "TheWinterShadow"
 release = "1.0.0"
 
