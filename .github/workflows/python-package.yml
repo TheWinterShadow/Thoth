@@ -1,4 +1,4 @@
-name: Publish Package
+name: Python Build and Package
 
 on:
   workflow_run:
