@@ -50,7 +50,19 @@ jobs:
         working-directory: ${{ env.TF_WORKING_DIR }}
         continue-on-error: true
 
+      - name: Terraform Import (if needed)
+        id: import
+        run: |
+          # Check if bucket exists in state
+          if ! terraform state show google_storage_bucket.thoth_bucket 2>/dev/null; then
+            echo "Bucket not in state, attempting to import..."
+            terraform import google_storage_bucket.thoth_bucket thoth-storage-bucket || true
+          fi
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        continue-on-error: true
+
       - name: Terraform Apply
         id: apply
+        if: github.ref == 'refs/heads/main'
         run: terraform apply -auto-approve -input=false
         working-directory: ${{ env.TF_WORKING_DIR }}
