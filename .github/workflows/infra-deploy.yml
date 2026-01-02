@@ -1,11 +1,11 @@
-name: 'Terraform Infra Deploy'
+name: "Terraform Infra Deploy"
 
 on:
   push:
     branches:
       - main
     paths:
-      - 'infra/**'
+      - "infra/**"
   workflow_dispatch:
 
 env:
@@ -13,7 +13,7 @@ env:
 
 jobs:
   terraform:
-    name: 'Terraform'
+    name: "Terraform"
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -26,13 +26,13 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v2
 
-      - name: Configure GCP Credentials
-        uses: actions-hub/gcloud@master
-        env:
-            PROJECT_ID: thoth-483015
-            APPLICATION_CREDENTIALS: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
         with:
-            args: info
+          credentials_json: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
 
       - name: Terraform Init
         id: init
