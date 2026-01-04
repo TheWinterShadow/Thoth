@@ -101,6 +101,20 @@ class HandbookRepoManager:
             except GitCommandError as e:
                 last_error = e
                 self.logger.warning("Clone attempt %d/%d failed: %s", attempt, max_retries, e)
+
+                # Clean up any partially cloned repository before retrying
+                if self.clone_path.exists():
+                    try:
+                        self.logger.info(
+                            "Removing partially cloned repository at %s", self.clone_path
+                        )
+                        shutil.rmtree(self.clone_path)
+                    except OSError as cleanup_error:
+                        self.logger.warning(
+                            "Failed to remove partially cloned repository at %s: %s",
+                            self.clone_path,
+                            cleanup_error,
+                        )
                 if attempt < max_retries:
                     self.logger.info("Retrying in %d seconds...", retry_delay)
                     time.sleep(retry_delay)
