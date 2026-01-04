@@ -10,10 +10,11 @@ name = "thoth"
 dynamic = ["version"]
 description = "DESCRIPTION"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = "MIT"
 keywords = [""]
 dependencies = [
+"mcp",
 ]
 authors = [
   { name = "TheWinterShadow", email = "elijah.j.winter@outlook.com" },
@@ -25,7 +26,6 @@ classifiers = [
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
   "Programming Language :: Python",
-  "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
@@ -51,6 +51,9 @@ dev = [
   "pytest-cov>=4.0.0",
   "bandit>=1.7.0",
   "pre-commit>=3.0.0",
+  "sphinx>=5.0.0",
+  "furo>=2023.0.0",
+  "mcp"
 ]
 
 # Documentation dependencies
@@ -72,6 +75,7 @@ all = [
   "sphinx>=5.0.0",
   "furo>=2.0.0",
   "myst-parser>=2.0.0",
+  "mcp",
 ]
 
 # ==============================================================================
@@ -223,14 +227,16 @@ setup-dev = [
 
 # Testing scripts
 test = "pytest {args:tests}"
-test-cov = "coverage run -m pytest {args:tests}"
+test-cov = "pytest --cov=thoth --cov-report=html:docs/build/coverage --cov-report=term {args:tests}"
 cov-report = [
-  "- coverage combine",
-  "coverage report",
+  "pytest --cov=thoth --cov-report=term-missing {args:tests}",
+]
+cov-html = [
+  "pytest --cov=thoth --cov-report=html:docs/build/coverage --cov-report=term {args:tests}",
+  "echo 'Coverage report generated at docs/build/coverage/index.html'",
 ]
 cov = [
-  "test-cov", 
-  "cov-report",
+  "test-cov",
 ]
 
 # Build pipeline
@@ -252,7 +258,7 @@ serve = "python -m http.server 8000 --directory docs/build"
 
 
 [[tool.hatch.envs.all.matrix]]
-python = ["3.9", "3.10", "3.11", "3.12", "3.13"]
+python = ["3.10", "3.11", "3.12", "3.13"]
 
 # ==============================================================================
 # TOOL CONFIGURATION
@@ -277,17 +283,24 @@ exclude_lines = [
   "if __name__ == .__main__.:",
   "if TYPE_CHECKING:",
 ]
+precision = 2
+show_missing = true
+skip_covered = false
+
+[tool.coverage.html]
+directory = "docs/build/coverage"
+title = "Thoth Test Coverage Report"
 
 # Code formatting configuration
 [tool.black]
 line-length = 88
-target-version = ["py39"]
+target-version = ["py310", "py311", "py312", "py313"]
 include = '\.pyi?$'
 
 # Ruff configuration (replaces isort, flake8, and more)
 [tool.ruff]
-target-version = "py39"
-line-length = 88
+target-version = "py310"
+line-length = 120
 
 [tool.ruff.lint]
 # Enable comprehensive rule sets
@@ -343,6 +356,8 @@ ignore = [
     "D213",   # Multi-line docstring summary should start at the second line
     "PLR0913", # Too many arguments to function call
     "PLR2004", # Magic value used in comparison
+    "PT009",  # Use of assert in tests is acceptable
+    "PT027",  # Allow unused test function arguments
 ]
 
 # Allow fix for all enabled rules (when `--fix`) is provided.
@@ -394,7 +409,7 @@ force-sort-within-sections = true
 
 # Type checking configuration
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
