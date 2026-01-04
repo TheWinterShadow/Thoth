@@ -64,3 +64,6 @@ override.tf.json
 *_override.tf
 *_override.tf.json
 .mypy_cache/
+*.sqlite3
+handbook_vectors/
+*.ipynb

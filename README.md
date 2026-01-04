@@ -11,6 +11,7 @@ Thoth is a modern Python library providing advanced utilities and tools for deve
 ## 🚀 Features
 
 - **Repository Management**: Clone and track GitLab handbook repository with automated updates
+- **Vector Database**: ChromaDB integration for storing and querying document embeddings with semantic search
 - **Modular Design**: Clean, composable utility functions
 - **Type Safety**: Full type annotations with mypy support
 - **High Performance**: Optimized implementations for common tasks
@@ -60,6 +61,48 @@ if metadata:
     print(f"Changed files: {changed_files}")
 ```
 
+### Vector Store
+
+```python
+from thoth.ingestion.vector_store import VectorStore
+
+# Initialize the vector store
+vector_store = VectorStore(
+    persist_directory="./chroma_db",
+    collection_name="handbook_docs"
+)
+
+# Add documents
+documents = [
+    "Python is a high-level programming language.",
+    "JavaScript is used for web development.",
+    "Machine learning is a subset of AI."
+]
+vector_store.add_documents(documents)
+
+# Search for similar documents
+results = vector_store.search_similar(
+    query="programming languages",
+    n_results=2
+)
+print(results["documents"])
+
+# Add documents with metadata for filtering
+vector_store.add_documents(
+    documents=["Python tutorial", "Advanced Python"],
+    metadatas=[
+        {"language": "python", "level": "beginner"},
+        {"language": "python", "level": "advanced"}
+    ]
+)
+
+# Search with filters
+results = vector_store.search_similar(
+    query="Python guide",
+    where={"level": "beginner"}
+)
+```
+
 ### MCP Server
 
 ```python
@@ -81,9 +124,11 @@ Thoth follows a modular architecture designed for extensibility and maintainabil
 thoth/
 ├── __init__.py          # Main package entry point
 ├── __about__.py         # Version and metadata
-├── ingestion/           # Repository management
+├── ingestion/           # Data ingestion and processing
 │   ├── __init__.py
-│   └── repo_manager.py  # GitLab handbook repository manager
+│   ├── chunker.py       # Markdown document chunker
+│   ├── repo_manager.py  # GitLab handbook repository manager
+│   └── vector_store.py  # ChromaDB vector database wrapper
 ├── mcp_server/          # MCP server implementation
 │   ├── __init__.py
 │   └── server.py        # Main MCP server
