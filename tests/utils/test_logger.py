@@ -39,13 +39,13 @@ Key Test Areas:
 
 Example Usage:
     Run all tests:
-        python -m pytest tests/test_logging.py -v
+        python -m pytest tests/utils/test_logger.py -v
 
     Run specific test class:
-        python -m pytest tests/test_logging.py::TestLoggingModule -v
+        python -m pytest tests/utils/test_logger.py::TestLoggingModule -v
 
     Run with coverage:
-        python -m pytest tests/test_logging.py --cov=horizon_core.logging
+        python -m pytest tests/utils/test_logger.py --cov=horizon_core.logging
 """
 
 import io
