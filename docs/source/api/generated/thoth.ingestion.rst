@@ -1,4 +1,4 @@
-thoth.ingestion
+﻿thoth.ingestion
 ===============
 
 .. automodule:: thoth.ingestion
@@ -8,7 +8,10 @@ thoth.ingestion
 
    .. autosummary::
    
+      Chunk
+      ChunkMetadata
       HandbookRepoManager
+      MarkdownChunker
    
 .. rubric:: Modules
 
@@ -16,4 +19,5 @@ thoth.ingestion
    :toctree:
    :recursive:
 
+   chunker
    repo_manager

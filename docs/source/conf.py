@@ -94,7 +94,7 @@ source_suffix = {
 
 # -- Options for HTML output -------------------------------------------------
 
-html_theme = "breeze"
+html_theme = "classic"
 html_static_path = ["_static"]
 
 # Alabaster theme options
