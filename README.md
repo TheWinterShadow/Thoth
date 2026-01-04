@@ -48,31 +48,56 @@ print(f"Thoth v{thoth.__version__} - Ready to enhance your Python experience!")
 
 ## 🏗️ Project Architecture
 
-Thoth follows a modular architecture designed for extensibility and maintainability. For detailed information about the project structure and design decisions, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Thoth follows a modular architecture designed for extensibility and maintainability.
 
 ```
 thoth/
 ├── __init__.py          # Main package entry point
 ├── __about__.py         # Version and metadata
+├── mcp_server/          # MCP server implementation
+│   ├── __init__.py
+│   └── server.py        # Main MCP server
 └── utils/               # Utility modules
-    └── __init__.py      # Utilities package
+    ├── __init__.py
+    └── logger.py        # Logging utilities
 ```
+
+For detailed information about the project structure and design decisions, see the [Architecture Guide](https://thewintershadow.github.io/Thoth/ARCHITECTURE.html).
 
 ## 🛠️ Development
 
-Interested in contributing? Check out our development guide at [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for information on:
+Interested in contributing? See the [Development Guide](https://thewintershadow.github.io/Thoth/DEVELOPMENT.html) for information on:
 
 - Setting up the development environment
 - Code style guidelines
 - Testing procedures
 - Release workflow
 
+Also check out our [Contributing Guide](CONTRIBUTING.md) for guidelines on submitting pull requests.
+
 ## 📖 Documentation
 
-- **API Documentation**: [https://thewintershadow.github.io/Thoth/](https://thewintershadow.github.io/Thoth/)
-- **Architecture Guide**: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-- **Development Guide**: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
-- **Contributing Guide**: [CONTRIBUTING.md](CONTRIBUTING.md)
+### Online Documentation
+- **[Full Documentation](https://thewintershadow.github.io/Thoth/)** - Complete API docs and guides
+- **[API Reference](https://thewintershadow.github.io/Thoth/api/modules.html)** - Auto-generated API documentation
+- **[Architecture Guide](https://thewintershadow.github.io/Thoth/ARCHITECTURE.html)** - System design and structure
+- **[Development Guide](https://thewintershadow.github.io/Thoth/DEVELOPMENT.html)** - Contributing and development workflow
+- **[MCP Tools](https://thewintershadow.github.io/Thoth/MCP_TOOLS.html)** - Model Context Protocol tools reference
+- **[Test Coverage](https://thewintershadow.github.io/Thoth/TEST_COVERAGE.html)** - Testing strategy and coverage
+- **[Coverage Report](https://thewintershadow.github.io/Thoth/coverage/index.html)** - Live test coverage report
+
+### Local Documentation
+Build and view documentation locally:
+
+```bash
+# Build documentation
+hatch run docs:build
+
+# View documentation
+open docs/build/index.html
+```
+
+For a complete documentation index, see [docs/README.md](docs/README.md).
 
 ## 🐛 Issues and Feature Requests
 
