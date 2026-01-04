@@ -193,8 +193,8 @@ class TestRunServerFunction(unittest.TestCase):
             run_server()
 
         # Verify error was logged
-        mock_logger.error.assert_called()
-        call_args = mock_logger.error.call_args
+        mock_logger.exception.assert_called()
+        call_args = mock_logger.exception.call_args
         self.assertIn("Server error", call_args[0][0])
 
 

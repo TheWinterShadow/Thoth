@@ -154,7 +154,9 @@ style = [
 ]
 typing = "mypy thoth"
 security = "bandit -r thoth"
-precommit = "pre-commit run --all-files"
+precommit = [
+  "pre-commit run --all-files || pre-commit run --all-files",
+]
 
 [tool.hatch.envs.docs]
 dependencies = [
@@ -172,7 +174,9 @@ typecheck-report = "mypy --html-report mypy-report thoth"
 # Pre-commit management
 precommit-install = "pre-commit install"
 precommit-update = "pre-commit autoupdate"
-precommit-run = "pre-commit run --all-files"
+precommit-run = [
+  "pre-commit run --all-files || pre-commit run --all-files",
+]
 
 [tool.hatch.envs.hatch-test]
 dependencies = [
@@ -215,8 +219,10 @@ check = [
   "security",
 ]
 
-# Pre-commit integration
-precommit = "pre-commit run --all-files"
+# Pre-commit integration (run twice to handle auto-fixes)
+precommit = [
+  "pre-commit run --all-files || pre-commit run --all-files",
+]
 precommit-install = "pre-commit install"
 
 # Setup development environment
