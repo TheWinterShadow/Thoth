@@ -54,7 +54,6 @@ dev = [
   "pre-commit>=3.0.0",
   "sphinx>=5.0.0",
   "furo>=2023.0.0",
-  "sphinx-breeze-theme",
   "mcp"
 ]
 
@@ -63,7 +62,6 @@ docs = [
   "sphinx>=5.0.0",
   "furo>=2023.0.0",
   "myst-parser>=2.0.0",
-  "sphinx-breeze-theme",
 ]
 
 # All optional dependencies combined
@@ -79,7 +77,6 @@ all = [
   "furo>=2.0.0",
   "myst-parser>=2.0.0",
   "mcp",
-  "sphinx-breeze-theme",
 ]
 
 # ==============================================================================
@@ -167,7 +164,6 @@ dependencies = [
   "sphinx",
   "furo", 
   "myst-parser",
-  "sphinx-breeze-theme",
 ]
 
 [tool.hatch.envs.dev.scripts]
@@ -370,6 +366,7 @@ ignore = [
     "PT009",  # Use of assert in tests is acceptable
     "PT027",  # Allow unused test function arguments
     "TRY300", # Consider moving statement to else block (stylistic preference)
+    "TRY301", # Abstract raise to inner function (stylistic preference)
     "PERF203", # try-except within loop (intentional for retry logic)
 ]
 
@@ -409,6 +406,7 @@ exclude = [
     "PLR2004", # Magic values are OK in tests
     "S101",   # Use of assert is OK in tests
     "ARG",    # Unused function args are OK in tests
+    "SLF001", # Private member access is OK in tests (testing private methods)
 ]
 
 [tool.ruff.lint.pydocstyle]
