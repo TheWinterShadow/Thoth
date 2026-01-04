@@ -106,8 +106,10 @@ class HandbookRepoManager:
                     time.sleep(retry_delay)
 
         msg = MSG_CLONE_FAILED.format(attempts=max_retries)
-        self.logger.exception("All clone attempts failed")
-        raise GitCommandError(msg, 1) from last_error
+        self.logger.exception("All clone attempts failed: %s", msg)
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError(msg)
 
     def update_repository(self) -> bool:
         """Update the repository by pulling latest changes.
