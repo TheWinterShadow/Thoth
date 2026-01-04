@@ -10,5 +10,6 @@
    :toctree:
    :recursive:
 
+   ingestion
    mcp_server
    utils
