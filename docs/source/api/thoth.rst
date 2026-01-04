@@ -15,5 +15,6 @@ Subpackages
 .. toctree::
    :maxdepth: 2
 
+   ingestion
    mcp_server
    utils

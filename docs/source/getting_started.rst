@@ -55,9 +55,43 @@ Or use the synchronous entry point:
    
    run_server()
 
+Using the Repository Manager
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The ingestion module provides tools for managing the GitLab handbook repository:
+
+.. code-block:: python
+
+   from pathlib import Path
+   from thoth.ingestion.repo_manager import HandbookRepoManager
+   
+   # Initialize the repository manager
+   manager = HandbookRepoManager()
+   
+   # Clone the handbook repository
+   repo_path = manager.clone_handbook()
+   print(f"Repository cloned to: {repo_path}")
+   
+   # Get current commit
+   commit_sha = manager.get_current_commit()
+   print(f"Current commit: {commit_sha}")
+   
+   # Save metadata for tracking
+   manager.save_metadata(commit_sha)
+   
+   # Later, update the repository
+   manager.update_repository()
+   
+   # Check for changed files
+   metadata = manager.load_metadata()
+   if metadata:
+       changed_files = manager.get_changed_files(metadata["commit_sha"])
+       print(f"Changed files: {changed_files}")
+
 Next Steps
 ----------
 
 - Explore the :doc:`MCP_TOOLS` documentation
 - Read the :doc:`api/mcp_server` API reference
+- Learn about :doc:`api/ingestion` for repository management
 - Check out :doc:`DEVELOPMENT` for contributing

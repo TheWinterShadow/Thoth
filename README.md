@@ -10,10 +10,11 @@ Thoth is a modern Python library providing advanced utilities and tools for deve
 
 ## 🚀 Features
 
+- **Repository Management**: Clone and track GitLab handbook repository with automated updates
 - **Modular Design**: Clean, composable utility functions
 - **Type Safety**: Full type annotations with mypy support
 - **High Performance**: Optimized implementations for common tasks
-- **Easy Integration**: Zero-dependency core with optional extensions
+- **Easy Integration**: Minimal dependencies with optional extensions
 - **Well Documented**: Comprehensive documentation and examples
 - **Thoroughly Tested**: Extensive test coverage with automated CI/CD
 
@@ -35,6 +36,32 @@ pip install -e ".[dev]"
 
 ## 🏃‍♂️ Quick Start
 
+### Repository Management
+
+```python
+from thoth.ingestion.repo_manager import HandbookRepoManager
+
+# Initialize the repository manager
+manager = HandbookRepoManager()
+
+# Clone the GitLab handbook repository
+repo_path = manager.clone_handbook()
+print(f"Repository cloned to: {repo_path}")
+
+# Get current commit and save metadata
+commit_sha = manager.get_current_commit()
+manager.save_metadata(commit_sha)
+
+# Update repository and check for changes
+manager.update_repository()
+metadata = manager.load_metadata()
+if metadata:
+    changed_files = manager.get_changed_files(metadata["commit_sha"])
+    print(f"Changed files: {changed_files}")
+```
+
+### MCP Server
+
 ```python
 import thoth
 from thoth.utils import (
@@ -54,6 +81,9 @@ Thoth follows a modular architecture designed for extensibility and maintainabil
 thoth/
 ├── __init__.py          # Main package entry point
 ├── __about__.py         # Version and metadata
+├── ingestion/           # Repository management
+│   ├── __init__.py
+│   └── repo_manager.py  # GitLab handbook repository manager
 ├── mcp_server/          # MCP server implementation
 │   ├── __init__.py
 │   └── server.py        # Main MCP server

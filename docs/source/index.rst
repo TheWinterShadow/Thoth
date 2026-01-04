@@ -38,6 +38,7 @@ and structure to your Python projects through well-designed, modular utilities.
 
    api/modules
    api/thoth
+   api/ingestion
    api/mcp_server
    api/utils
 

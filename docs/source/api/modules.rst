@@ -8,6 +8,7 @@ This section provides detailed API documentation for all Thoth modules.
    :recursive:
 
    thoth
+   thoth.ingestion
    thoth.mcp_server
    thoth.utils
 
