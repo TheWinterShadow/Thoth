@@ -79,6 +79,7 @@ all = [
   "furo>=2.0.0",
   "myst-parser>=2.0.0",
   "mcp",
+  "sphinx-breeze-theme",
 ]
 
 # ==============================================================================
@@ -166,6 +167,7 @@ dependencies = [
   "sphinx",
   "furo", 
   "myst-parser",
+  "sphinx-breeze-theme",
 ]
 
 [tool.hatch.envs.dev.scripts]
