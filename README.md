@@ -12,6 +12,7 @@ Thoth is a modern Python library providing advanced utilities and tools for deve
 
 - **Repository Management**: Clone and track GitLab handbook repository with automated updates
 - **Vector Database**: ChromaDB integration for storing and querying document embeddings with semantic search
+- **Embedding Generation**: Efficient batch embedding generation using sentence-transformers models
 - **Modular Design**: Clean, composable utility functions
 - **Type Safety**: Full type annotations with mypy support
 - **High Performance**: Optimized implementations for common tasks
@@ -66,13 +67,13 @@ if metadata:
 ```python
 from thoth.ingestion.vector_store import VectorStore
 
-# Initialize the vector store
+# Initialize the vector store (uses all-MiniLM-L6-v2 by default)
 vector_store = VectorStore(
     persist_directory="./chroma_db",
     collection_name="handbook_docs"
 )
 
-# Add documents
+# Add documents - embeddings are automatically generated
 documents = [
     "Python is a high-level programming language.",
     "JavaScript is used for web development.",
@@ -80,7 +81,7 @@ documents = [
 ]
 vector_store.add_documents(documents)
 
-# Search for similar documents
+# Search for similar documents using semantic similarity
 results = vector_store.search_similar(
     query="programming languages",
     n_results=2
@@ -101,6 +102,30 @@ results = vector_store.search_similar(
     query="Python guide",
     where={"level": "beginner"}
 )
+```
+
+### Embedding Generation
+
+```python
+from thoth.ingestion.embedder import Embedder
+
+# Initialize embedder with default model (all-MiniLM-L6-v2)
+embedder = Embedder()
+
+# Generate embeddings for texts
+texts = ["Document 1", "Document 2", "Document 3"]
+embeddings = embedder.embed(texts, show_progress=True)
+
+# Generate single embedding
+embedding = embedder.embed_single("Single document")
+
+# Get model information
+info = embedder.get_model_info()
+print(f"Embedding dimension: {info['embedding_dimension']}")
+
+# Use alternative model for higher quality
+high_quality_embedder = Embedder(model_name="all-mpnet-base-v2")
+embeddings = high_quality_embedder.embed(texts)
 ```
 
 ### MCP Server
@@ -127,6 +152,7 @@ thoth/
 ├── ingestion/           # Data ingestion and processing
 │   ├── __init__.py
 │   ├── chunker.py       # Markdown document chunker
+│   ├── embedder.py      # Embedding generation with sentence-transformers
 │   ├── repo_manager.py  # GitLab handbook repository manager
 │   └── vector_store.py  # ChromaDB vector database wrapper
 ├── mcp_server/          # MCP server implementation

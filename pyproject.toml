@@ -17,6 +17,8 @@ dependencies = [
 "mcp",
 "gitpython>=3.1.0",
 "chromadb>=0.4.0,<0.6.0",
+"sentence-transformers>=2.2.0",
+"torch>=2.0.0",
 ]
 authors = [
   { name = "TheWinterShadow", email = "elijah.j.winter@outlook.com" },

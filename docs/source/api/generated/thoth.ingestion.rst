@@ -21,5 +21,6 @@
    :recursive:
 
    chunker
+   embedder
    repo_manager
    vector_store

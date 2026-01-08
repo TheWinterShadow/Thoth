@@ -67,3 +67,4 @@ override.tf.json
 *.sqlite3
 handbook_vectors/
 *.ipynb
+benchmark_embeddings.py
