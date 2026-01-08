@@ -16,7 +16,7 @@ keywords = [""]
 dependencies = [
 "mcp",
 "gitpython>=3.1.0",
-"chromadb>=0.4.0",
+"chromadb>=0.4.0,<0.6.0",
 ]
 authors = [
   { name = "TheWinterShadow", email = "elijah.j.winter@outlook.com" },
