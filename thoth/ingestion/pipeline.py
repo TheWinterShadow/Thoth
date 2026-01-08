@@ -156,7 +156,7 @@ class IngestionPipeline:
 
     def _save_state(self) -> None:
         """Save current pipeline state to disk."""
-        self.state.last_update_time = datetime.now().astimezone().isoformat()
+        self.state.last_update_time = datetime.now(timezone.utc).isoformat()
 
         try:
             self.state_file.parent.mkdir(parents=True, exist_ok=True)
@@ -370,14 +370,13 @@ class IngestionPipeline:
                 )
 
                 def make_callback(start: int) -> Callable[[int, int, str], None] | None:
-                    return lambda c, _t, m: (
-                        progress_callback(
-                            20 + int((start + c) / len(files_to_process) * 70),
-                            100,
-                            m,
-                        )
-                        if progress_callback
-                        else None
+                    if progress_callback is None:
+                        return None
+
+                    return lambda c, _t, m: progress_callback(
+                        20 + int((start + c) / len(files_to_process) * 70),
+                        100,
+                        m,
                     )
 
                 successful, failed = self._process_batch(
