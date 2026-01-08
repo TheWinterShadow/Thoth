@@ -110,12 +110,10 @@ class TestEmbedder:
         assert sim_1_2 > sim_1_3
         assert sim_1_2 > 0.5  # Should be fairly similar
 
-    def test_different_model(self):
-        """Test initialization with a different model."""
-        # Test with another model (if available)
-        # This test might be slow as it downloads a new model
+    def test_embedder_basic_initialization(self):
+        """Test initialization without using the embedder fixture."""
         embedder = Embedder(model_name="all-MiniLM-L6-v2", device="cpu")
-        text = "Test with different model."
+        text = "Test embedding with explicitly created embedder."
         embedding = embedder.embed_single(text)
 
         assert isinstance(embedding, list)
