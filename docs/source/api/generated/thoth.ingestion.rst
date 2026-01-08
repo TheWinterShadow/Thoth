@@ -1,4 +1,4 @@
-﻿thoth.ingestion
+thoth.ingestion
 ===============
 
 .. automodule:: thoth.ingestion
@@ -22,5 +22,6 @@
 
    chunker
    embedder
+   pipeline
    repo_manager
    vector_store

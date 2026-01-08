@@ -19,6 +19,8 @@ dependencies = [
 "chromadb>=0.4.0,<0.6.0",
 "sentence-transformers>=2.2.0",
 "torch>=2.0.0,<2.6.0",
+"click>=8.1.0",
+"rich>=13.0.0",
 ]
 authors = [
   { name = "TheWinterShadow", email = "elijah.j.winter@outlook.com" },
@@ -44,6 +46,10 @@ Homepage = "https://github.com/TheWinterShadow/Thoth"
 Repository = "https://github.com/TheWinterShadow/Thoth"
 Issues = "https://github.com/TheWinterShadow/Thoth/issues"
 Changelog = "https://github.com/TheWinterShadow/Thoth/blob/main/CHANGELOG.md"
+
+[project.scripts]
+thoth = "thoth.cli:cli"
+
 [project.optional-dependencies]
 
 # Development dependencies
