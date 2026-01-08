@@ -58,12 +58,19 @@ class Embedder:
             List of embedding vectors, where each vector is a list of floats.
 
         Raises:
-            ValueError: If texts list is empty.
+            ValueError: If texts list is empty or contains empty/whitespace-only strings.
         """
         if not texts:
             msg = "Cannot generate embeddings for empty text list"
             raise ValueError(msg)
 
+        invalid_indices = [i for i, text in enumerate(texts) if not isinstance(text, str) or not text.strip()]
+        if invalid_indices:
+            msg = (
+                "Cannot generate embeddings for empty or whitespace-only texts; "
+                f"invalid entries at indices: {invalid_indices}"
+            )
+            raise ValueError(msg)
         logger.info(f"Generating embeddings for {len(texts)} texts with batch_size={self.batch_size}")
 
         # Generate embeddings with batch processing
