@@ -9,6 +9,7 @@ thoth.ingestion.vector\_store
    .. autosummary::
    
       Any
+      Embedder
       Path
       Settings
       VectorStore

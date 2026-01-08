@@ -11,6 +11,8 @@ from typing import Any
 import chromadb
 from chromadb.config import Settings
 
+from thoth.ingestion.embedder import Embedder
+
 logger = logging.getLogger(__name__)
 
 
@@ -24,15 +26,21 @@ class VectorStore:
         self,
         persist_directory: str = "./chroma_db",
         collection_name: str = "thoth_documents",
+        embedder: Embedder | None = None,
     ):
         """Initialize the ChromaDB vector store.
 
         Args:
             persist_directory: Directory path for ChromaDB persistence
             collection_name: Name of the ChromaDB collection
+            embedder: Optional Embedder instance for generating embeddings.
+                If not provided, a default Embedder with all-MiniLM-L6-v2 will be created.
         """
         self.persist_directory = Path(persist_directory)
         self.collection_name = collection_name
+
+        # Initialize or use provided embedder
+        self.embedder = embedder or Embedder(model_name="all-MiniLM-L6-v2")
 
         # Create persist directory if it doesn't exist
         self.persist_directory.mkdir(parents=True, exist_ok=True)
@@ -49,12 +57,14 @@ class VectorStore:
         )
 
         logger.info(f"Initialized VectorStore with collection '{collection_name}' at '{persist_directory}'")
+        logger.info(f"Using embedder: {self.embedder.model_name}")
 
     def add_documents(
         self,
         documents: list[str],
         metadatas: list[dict[str, Any]] | None = None,
         ids: list[str] | None = None,
+        embeddings: list[list[float]] | None = None,
     ) -> None:
         """Add documents to the vector store.
 
@@ -63,6 +73,8 @@ class VectorStore:
             metadatas: Optional list of metadata dicts for each document
             ids: Optional list of unique IDs for each document.
                  If not provided, IDs will be auto-generated.
+            embeddings: Optional pre-computed embeddings. If not provided,
+                embeddings will be generated using the configured Embedder.
 
         Raises:
             ValueError: If list lengths don't match
@@ -79,16 +91,27 @@ class VectorStore:
         if ids and len(ids) != len(documents):
             msg = f"Number of ids ({len(ids)}) must match number of documents ({len(documents)})"
             raise ValueError(msg)
+
+        if embeddings and len(embeddings) != len(documents):
+            msg = f"Number of embeddings ({len(embeddings)}) must match number of documents ({len(documents)})"
+            raise ValueError(msg)
+
         if ids is None:
             # Get current count to generate sequential IDs
             current_count = self.collection.count()
             ids = [f"doc_{current_count + i}" for i in range(len(documents))]
+
+        # Generate embeddings if not provided
+        if embeddings is None:
+            logger.info(f"Generating embeddings for {len(documents)} documents")
+            embeddings = self.embedder.embed(documents, show_progress=True)
 
         # Add documents to collection
         self.collection.add(
             documents=documents,
             metadatas=metadatas,  # type: ignore[arg-type]
             ids=ids,
+            embeddings=embeddings,  # type: ignore[arg-type]
         )
 
         logger.info(f"Added {len(documents)} documents to collection")
@@ -99,6 +122,7 @@ class VectorStore:
         n_results: int = 5,
         where: dict[str, Any] | None = None,
         where_document: dict[str, Any] | None = None,
+        query_embedding: list[float] | None = None,
     ) -> dict[str, Any]:
         """Search for similar documents using semantic similarity.
 
@@ -107,6 +131,8 @@ class VectorStore:
             n_results: Number of results to return (default: 5)
             where: Optional metadata filter conditions
             where_document: Optional document content filter conditions
+            query_embedding: Optional pre-computed query embedding. If not provided,
+                embedding will be generated from the query text.
 
         Returns:
             Dict containing:
@@ -115,8 +141,12 @@ class VectorStore:
                 - metadatas: List of metadata dicts
                 - distances: List of distance scores
         """
+        # Generate query embedding if not provided
+        if query_embedding is None:
+            query_embedding = self.embedder.embed_single(query)
+
         results = self.collection.query(
-            query_texts=[query],
+            query_embeddings=[query_embedding],  # type: ignore[arg-type]
             n_results=n_results,
             where=where,
             where_document=where_document,  # type: ignore[arg-type]
