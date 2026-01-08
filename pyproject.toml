@@ -16,6 +16,7 @@ keywords = [""]
 dependencies = [
 "mcp",
 "gitpython>=3.1.0",
+"chromadb>=0.4.0,<0.6.0",
 ]
 authors = [
   { name = "TheWinterShadow", email = "elijah.j.winter@outlook.com" },
@@ -368,6 +369,7 @@ ignore = [
     "TRY300", # Consider moving statement to else block (stylistic preference)
     "TRY301", # Abstract raise to inner function (stylistic preference)
     "PERF203", # try-except within loop (intentional for retry logic)
+    "G004",  # Logging string interpolation (acceptable in some cases)
 ]
 
 # Allow fix for all enabled rules (when `--fix`) is provided.
@@ -431,6 +433,8 @@ ignore_missing_imports = true
 show_error_codes = true
 # Be strict about TYPE_CHECKING imports
 warn_unused_ignores = true
+# Disable caching to avoid cache corruption issues
+cache_dir = "/dev/null"
 
 # Security scanning configuration
 [tool.bandit]

@@ -1,14 +1,14 @@
 Ingestion Module
 ================
 
-The ingestion module handles repository cloning, tracking, and management for the GitLab handbook.
+The ingestion module handles repository management, document chunking, and vector storage for the GitLab handbook.
 
 Overview
 --------
 
-The ingestion module provides tools for managing Git repositories, with a focus on the GitLab handbook.
-It includes features for cloning repositories with retry logic, tracking commit history, managing metadata,
-and detecting file changes between commits.
+The ingestion module provides tools for managing Git repositories, processing markdown documents,
+and storing document embeddings in a vector database. It includes features for cloning repositories,
+tracking commit history, chunking markdown files, and semantic search capabilities.
 
 Key Features
 ~~~~~~~~~~~~
@@ -17,10 +17,16 @@ Key Features
 * **Track commit history** to monitor repository changes
 * **Save and load metadata** for persistent repository state
 * **Detect changed files** between any two commits
-* **Force re-cloning** when repository updates are needed
+* **Chunk markdown documents** intelligently based on headings and token limits
+* **Store embeddings** in ChromaDB for semantic search
+* **Search documents** using natural language queries
+* **CRUD operations** for managing document vectors
 
 Example Usage
 ~~~~~~~~~~~~~
+
+Repository Management
+^^^^^^^^^^^^^^^^^^^^^
 
 .. code-block:: python
 
@@ -50,6 +56,45 @@ Example Usage
    if metadata:
        changed_files = manager.get_changed_files(metadata["commit_sha"])
 
+Vector Store
+^^^^^^^^^^^^
+
+.. code-block:: python
+
+   from thoth.ingestion.vector_store import VectorStore
+
+   # Initialize vector store
+   vector_store = VectorStore(
+       persist_directory="./chroma_db",
+       collection_name="handbook_docs"
+   )
+
+   # Add documents
+   documents = [
+       "Python is a programming language.",
+       "JavaScript is used for web development."
+   ]
+   metadatas = [
+       {"language": "python", "type": "definition"},
+       {"language": "javascript", "type": "definition"}
+   ]
+   vector_store.add_documents(documents, metadatas=metadatas)
+
+   # Search for similar documents
+   results = vector_store.search_similar(
+       query="programming languages",
+       n_results=5
+   )
+
+   # Search with metadata filter
+   python_docs = vector_store.search_similar(
+       query="programming",
+       where={"language": "python"}
+   )
+
+   # Delete documents
+   vector_store.delete_documents(ids=["doc_1", "doc_2"])
+
 Module Contents
 ---------------
 
@@ -57,6 +102,24 @@ Repository Manager
 ~~~~~~~~~~~~~~~~~~
 
 .. automodule:: thoth.ingestion.repo_manager
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :no-index:
+
+Markdown Chunker
+~~~~~~~~~~~~~~~~
+
+.. automodule:: thoth.ingestion.chunker
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :no-index:
+
+Vector Store
+~~~~~~~~~~~~
+
+.. automodule:: thoth.ingestion.vector_store
    :members:
    :undoc-members:
    :show-inheritance:

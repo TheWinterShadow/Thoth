@@ -12,6 +12,7 @@
       ChunkMetadata
       HandbookRepoManager
       MarkdownChunker
+      VectorStore
    
 .. rubric:: Modules
 
@@ -21,3 +22,4 @@
 
    chunker
    repo_manager
+   vector_store
