@@ -28,6 +28,15 @@ Thoth is a modern Python library providing advanced utilities and tools for deve
 pip install thoth
 ```
 
+### CPU-Only Installation (Faster, Smaller)
+
+For CPU-only PyTorch (recommended for most use cases):
+
+```bash
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install thoth
+```
+
 ### Development Installation
 
 ```bash
