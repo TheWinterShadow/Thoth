@@ -392,7 +392,7 @@ class ThothMCPServer:
             search_time,
         )
 
-        # Update cache with simple LRU eviction
+        # Update cache with simple FIFO eviction
         # Remove oldest entry if cache is at capacity
         if len(self._search_cache) >= self._cache_max_size:
             # Remove first (oldest) entry - FIFO eviction
