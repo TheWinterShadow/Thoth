@@ -354,7 +354,7 @@ class ThothMCPServer:
             Uses manual caching instead of functools.lru_cache to avoid
             memory leaks with instance methods. Results are converted to
             tuples for hashability and immutability.
-        """  # (continuation of docstring)
+        """
         # Check cache for existing results
         cache_key = (query, n_results, filter_section)
         if cache_key in self._search_cache:
