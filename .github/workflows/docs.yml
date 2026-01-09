@@ -1,10 +1,18 @@
-name: Deploy Documentation
+name: Documentation
 
 on:
-  workflow_run:
-    workflows: ["Python Build and Package"]
-    types:
-      - completed
+  push:
+    branches: ["main"]
+    paths:
+      - "docs/**"
+      - "thoth/**"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "docs/**"
+      - "thoth/**"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -17,44 +25,47 @@ concurrency:
 
 jobs:
   build-docs:
-    name: 'Build Documentation'
+    name: "Build Documentation"
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
-        
-    - name: Install Hatch
-      run: pip install hatch
-      
-    - name: Build documentation
-      run: hatch run docs:build
-      
-    - name: Workflow Summary
-      run: |
-        echo "✅ Documentation build completed successfully" >> $GITHUB_STEP_SUMMARY
-        echo "📚 Documentation will be deployed to GitHub Pages" >> $GITHUB_STEP_SUMMARY
-        echo "🔄 Next: CI Tests will run automatically" >> $GITHUB_STEP_SUMMARY
-      
-    - name: Setup Pages
-      uses: actions/configure-pages@v4
-      
-    - name: Upload artifact
-      uses: actions/upload-pages-artifact@v3
-      with:
-        path: 'docs/build'
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Cache Hatch environments
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/hatch
+          key: hatch-docs-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            hatch-docs-${{ runner.os }}-
+
+      - name: Install Hatch
+        run: |
+          python -m pip install --upgrade pip
+          pip install hatch
+
+      - name: Build documentation
+        run: |
+          hatch run docs:build
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: "docs/build"
 
   deploy-docs:
-    name: 'Deploy Documentation to GitHub Pages'
+    name: "Deploy to GitHub Pages"
+    runs-on: ubuntu-latest
+    needs: build-docs
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    needs: build-docs
-    if: github.ref == 'refs/heads/main'
     steps:
       - name: Deploy to GitHub Pages
         id: deployment

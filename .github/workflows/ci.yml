@@ -1,4 +1,4 @@
-name: CI Tests
+name: CI
 
 on:
   push:
@@ -6,40 +6,174 @@ on:
   pull_request:
     branches: ["main"]
 
-jobs:
-  test-matrix:
-    name: "Test Python ${{ matrix.python-version }}"
-    runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'push' || github.event_name == 'pull_request' }}
-    strategy:
-      matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+permissions:
+  contents: read
+  pull-requests: read
 
+jobs:
+  # Linting and formatting checks
+  lint:
+    name: "Lint & Format"
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Cache Hatch environments
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/hatch
+          key: hatch-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            hatch-${{ runner.os }}-
 
       - name: Install Hatch
         run: |
           python -m pip install --upgrade pip
           pip install hatch
 
-      - name: Install PyTorch CPU-only (for CI efficiency)
+      - name: Run linting checks
+        run: |
+          hatch run dev:pre-build
+
+  # Type checking
+  type-check:
+    name: "Type Check"
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Cache Hatch environments
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/hatch
+          key: hatch-typecheck-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            hatch-typecheck-${{ runner.os }}-
+
+      - name: Cache PyTorch
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pytorch-cpu-${{ runner.os }}
+          restore-keys: |
+            pytorch-cpu-${{ runner.os }}-
+
+      - name: Install Hatch
+        run: |
+          python -m pip install --upgrade pip
+          pip install hatch
+
+      - name: Install PyTorch CPU-only
         run: |
           pip install torch --index-url https://download.pytorch.org/whl/cpu
 
-      - name: Run type checking
+      - name: Run MyPy
         run: |
           hatch run dev:mypy thoth
+
+  # Test matrix across Python versions
+  test:
+    name: "Test (Python ${{ matrix.python-version }})"
+    runs-on: ubuntu-latest
+    needs: type-check
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          sudo apt-get clean
+          docker system prune -af
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Cache Hatch environments
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/hatch
+          key: hatch-test-${{ runner.os }}-py${{ matrix.python-version }}-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            hatch-test-${{ runner.os }}-py${{ matrix.python-version }}-
+
+      - name: Cache PyTorch
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pytorch-cpu-${{ runner.os }}-py${{ matrix.python-version }}
+          restore-keys: |
+            pytorch-cpu-${{ runner.os }}-
+
+      - name: Install Hatch
+        run: |
+          python -m pip install --upgrade pip
+          pip install hatch
+
+      - name: Install PyTorch CPU-only
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
 
       - name: Run tests
         run: |
           hatch test
 
+  # Build package
+  build:
+    name: "Build Package"
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Cache Hatch environments
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/hatch
+          key: hatch-build-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            hatch-build-${{ runner.os }}-
+
+      - name: Install Hatch
+        run: |
+          python -m pip install --upgrade pip
+          pip install hatch
+
       - name: Build package
         run: |
           hatch build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7

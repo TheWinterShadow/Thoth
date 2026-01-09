@@ -8,6 +8,10 @@ on:
       - "infra/**"
   workflow_dispatch:
 
+permissions:
+  contents: read
+  id-token: write
+
 env:
   TF_WORKING_DIR: ./infra
 
@@ -15,9 +19,6 @@ jobs:
   terraform:
     name: "Terraform"
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
 
     steps:
       - name: Checkout
