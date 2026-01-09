@@ -10,7 +10,7 @@ The Thoth MCP Server provides semantic search capabilities over handbook content
 
 - **Vector Store**: ChromaDB with cosine similarity
 - **Embedding Model**: all-MiniLM-L6-v2 (configurable)
-- **Cache Strategy**: Manual LRU with 100 entry limit
+- **Cache Strategy**: FIFO eviction with 100 entry limit
 - **Performance Target**: <2 seconds response time
 - **Transport**: stdio (standard input/output)
 
