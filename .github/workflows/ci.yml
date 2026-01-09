@@ -18,19 +18,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          sudo apt-get clean
+          docker system prune -af
+
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
-
-      - name: Cache Hatch environments
-        uses: actions/cache@v4
-        with:
-          path: ~/.local/share/hatch
-          key: hatch-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
-          restore-keys: |
-            hatch-${{ runner.os }}-
 
       - name: Install Hatch
         run: |
@@ -49,19 +49,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          sudo apt-get clean
+          docker system prune -af
+
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
-
-      - name: Cache Hatch environments
-        uses: actions/cache@v4
-        with:
-          path: ~/.local/share/hatch
-          key: hatch-typecheck-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
-          restore-keys: |
-            hatch-typecheck-${{ runner.os }}-
 
       - name: Cache PyTorch
         uses: actions/cache@v4
@@ -111,14 +111,6 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: "pip"
 
-      - name: Cache Hatch environments
-        uses: actions/cache@v4
-        with:
-          path: ~/.local/share/hatch
-          key: hatch-test-${{ runner.os }}-py${{ matrix.python-version }}-${{ hashFiles('pyproject.toml') }}
-          restore-keys: |
-            hatch-test-${{ runner.os }}-py${{ matrix.python-version }}-
-
       - name: Cache PyTorch
         uses: actions/cache@v4
         with:
@@ -153,14 +145,6 @@ jobs:
         with:
           python-version: "3.11"
           cache: "pip"
-
-      - name: Cache Hatch environments
-        uses: actions/cache@v4
-        with:
-          path: ~/.local/share/hatch
-          key: hatch-build-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
-          restore-keys: |
-            hatch-build-${{ runner.os }}-
 
       - name: Install Hatch
         run: |
