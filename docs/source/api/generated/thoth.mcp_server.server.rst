@@ -1,4 +1,4 @@
-thoth.mcp\_server.server
+﻿thoth.mcp\_server.server
 ========================
 
 .. automodule:: thoth.mcp_server.server
@@ -18,8 +18,10 @@ thoth.mcp\_server.server
    .. autosummary::
    
       Any
+      Path
       Server
       TextContent
       ThothMCPServer
       Tool
+      VectorStore
    
