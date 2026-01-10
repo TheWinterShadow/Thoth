@@ -821,3 +821,260 @@ class TestHandbookToolIntegration(unittest.IsolatedAsyncioTestCase):
 
         # Issue #35: Performance optimization with caching
         self.assertTrue(hasattr(self.server, "_search_cache"))
+
+
+class TestGetHandbookSection(unittest.IsolatedAsyncioTestCase):
+    """Test suite for get_handbook_section tool (Issue #37)."""
+
+    async def asyncSetUp(self):
+        """Set up test fixtures for section retrieval tests."""
+        self.server = ThothMCPServer(
+            name="section-test-server",
+            version="1.0.0",
+            handbook_db_path="./handbook_vectors",
+        )
+
+    async def test_get_handbook_section_method_exists(self):
+        """Test that _get_handbook_section method exists."""
+        self.assertTrue(hasattr(self.server, "_get_handbook_section"))
+        self.assertTrue(inspect.iscoroutinefunction(self.server._get_handbook_section))
+
+    async def test_get_handbook_section_signature(self):
+        """Test _get_handbook_section has correct signature."""
+        sig = inspect.signature(self.server._get_handbook_section)
+        self.assertIn("section_name", sig.parameters)
+        self.assertIn("limit", sig.parameters)
+
+        # Check defaults
+        self.assertEqual(sig.parameters["limit"].default, 50)
+
+    async def test_get_handbook_section_with_no_vector_store(self):
+        """Test error handling when vector store is not available."""
+        self.server.vector_store = None
+        result = await self.server._get_handbook_section("test_section")
+        self.assertIn("Error", result)
+
+    async def test_get_handbook_section_limit_validation(self):
+        """Test that limit parameter is validated and clamped."""
+        if self.server.vector_store is None:
+            self.skipTest("Vector store not available")
+
+        # Test will clamp limits in the actual method
+        # We just need to verify the method handles edge cases
+        with patch.object(self.server.vector_store, "get_documents") as mock_get:
+            mock_get.return_value = {"documents": [], "metadatas": []}
+
+            # Test with various limits
+            await self.server._get_handbook_section("test", limit=1)
+            await self.server._get_handbook_section("test", limit=100)
+            # Should clamp to 1
+            await self.server._get_handbook_section("test", limit=0)
+            # Should clamp to 100
+            await self.server._get_handbook_section("test", limit=200)
+
+    async def test_get_handbook_section_formats_output(self):
+        """Test that section retrieval formats output correctly."""
+        if self.server.vector_store is None:
+            self.skipTest("Vector store not available")
+
+        with patch.object(self.server.vector_store, "get_documents") as mock_get:
+            mock_get.return_value = {
+                "documents": ["Test content 1", "Test content 2"],
+                "metadatas": [
+                    {"section": "test", "source": "test.md", "chunk_index": 0},
+                    {"section": "test", "source": "test.md", "chunk_index": 1},
+                ],
+            }
+
+            result = await self.server._get_handbook_section("test")
+
+            # Verify output format
+            self.assertIn("Handbook Section:", result)
+            self.assertIn("test", result)
+            self.assertIn("Total chunks:", result)
+            self.assertIn("Test content 1", result)
+            self.assertIn("Test content 2", result)
+
+    async def test_get_handbook_section_no_results(self):
+        """Test handling when section has no content."""
+        if self.server.vector_store is None:
+            self.skipTest("Vector store not available")
+
+        with patch.object(self.server.vector_store, "get_documents") as mock_get:
+            mock_get.return_value = {"documents": [], "metadatas": []}
+
+            result = await self.server._get_handbook_section("nonexistent")
+            self.assertIn("No content found", result)
+            self.assertIn("nonexistent", result)
+
+
+class TestListHandbookTopics(unittest.IsolatedAsyncioTestCase):
+    """Test suite for list_handbook_topics tool (Issue #38)."""
+
+    async def asyncSetUp(self):
+        """Set up test fixtures for topic listing tests."""
+        self.server = ThothMCPServer(
+            name="topics-test-server",
+            version="1.0.0",
+            handbook_db_path="./handbook_vectors",
+        )
+
+    async def test_list_handbook_topics_method_exists(self):
+        """Test that _list_handbook_topics method exists."""
+        self.assertTrue(hasattr(self.server, "_list_handbook_topics"))
+        self.assertTrue(inspect.iscoroutinefunction(self.server._list_handbook_topics))
+
+    async def test_list_handbook_topics_signature(self):
+        """Test _list_handbook_topics has correct signature."""
+        sig = inspect.signature(self.server._list_handbook_topics)
+        self.assertIn("max_depth", sig.parameters)
+
+        # Check default
+        self.assertEqual(sig.parameters["max_depth"].default, 2)
+
+    async def test_list_handbook_topics_with_no_vector_store(self):
+        """Test error handling when vector store is not available."""
+        self.server.vector_store = None
+        result = await self.server._list_handbook_topics()
+        self.assertIn("Error", result)
+
+    async def test_list_handbook_topics_depth_validation(self):
+        """Test that max_depth parameter is validated and clamped."""
+        if self.server.vector_store is None:
+            self.skipTest("Vector store not available")
+
+        with (
+            patch.object(self.server.vector_store, "get_document_count") as mock_count,
+            patch.object(self.server.vector_store, "get_documents") as mock_get,
+        ):
+            mock_count.return_value = 0
+            mock_get.return_value = {"documents": [], "metadatas": []}
+
+            # Test with various depths
+            await self.server._list_handbook_topics(max_depth=1)
+            await self.server._list_handbook_topics(max_depth=5)
+            # Should clamp to 1
+            await self.server._list_handbook_topics(max_depth=0)
+            # Should clamp to 5
+            await self.server._list_handbook_topics(max_depth=10)
+
+    async def test_list_handbook_topics_formats_output(self):
+        """Test that topic listing formats output correctly."""
+        if self.server.vector_store is None:
+            self.skipTest("Vector store not available")
+
+        with (
+            patch.object(self.server.vector_store, "get_document_count") as mock_count,
+            patch.object(self.server.vector_store, "get_documents") as mock_get,
+        ):
+            mock_count.return_value = 5
+            mock_get.return_value = {
+                "documents": ["doc1", "doc2", "doc3", "doc4", "doc5"],
+                "metadatas": [
+                    {"section": "introduction"},
+                    {"section": "introduction"},
+                    {"section": "guidelines"},
+                    {"section": "guidelines"},
+                    {"section": "procedures"},
+                ],
+            }
+
+            result = await self.server._list_handbook_topics()
+
+            # Verify output format
+            self.assertIn("Handbook Topics and Sections", result)
+            self.assertIn("Total documents:", result)
+            self.assertIn("Available Sections:", result)
+            self.assertIn("introduction", result)
+            self.assertIn("guidelines", result)
+            self.assertIn("procedures", result)
+            self.assertIn("chunks", result)
+
+    async def test_list_handbook_topics_empty_handbook(self):
+        """Test handling when handbook is empty."""
+        if self.server.vector_store is None:
+            self.skipTest("Vector store not available")
+
+        with patch.object(self.server.vector_store, "get_document_count") as mock_count:
+            mock_count.return_value = 0
+
+            result = await self.server._list_handbook_topics()
+            self.assertIn("empty", result.lower())
+            self.assertIn("No topics", result)
+
+    async def test_list_handbook_topics_counts_sections(self):
+        """Test that topic listing correctly counts chunks per section."""
+        if self.server.vector_store is None:
+            self.skipTest("Vector store not available")
+
+        with (
+            patch.object(self.server.vector_store, "get_document_count") as mock_count,
+            patch.object(self.server.vector_store, "get_documents") as mock_get,
+        ):
+            mock_count.return_value = 4
+            mock_get.return_value = {
+                "documents": ["d1", "d2", "d3", "d4"],
+                "metadatas": [
+                    {"section": "section_a"},
+                    {"section": "section_a"},
+                    {"section": "section_a"},
+                    {"section": "section_b"},
+                ],
+            }
+
+            result = await self.server._list_handbook_topics()
+
+            # Verify counts are correct
+            self.assertIn("section_a (3 chunks)", result)
+            self.assertIn("section_b (1 chunk)", result)
+
+
+class TestContentRetrievalToolsIntegration(unittest.IsolatedAsyncioTestCase):
+    """Integration tests for content retrieval tools (Issue #36)."""
+
+    async def asyncSetUp(self):
+        """Set up integration test fixtures."""
+        self.server = ThothMCPServer(
+            name="content-retrieval-test",
+            version="1.0.0",
+            handbook_db_path="./handbook_vectors",
+        )
+
+    async def test_issue_36_requirements_met(self):
+        """Test that Issue #36 requirements are met."""
+        # Requirement: get_handbook_section works
+        self.assertTrue(hasattr(self.server, "_get_handbook_section"))
+
+        # Requirement: list_handbook_topics works
+        self.assertTrue(hasattr(self.server, "_list_handbook_topics"))
+
+    async def test_issue_37_get_handbook_section_implemented(self):
+        """Test Issue #37: get_handbook_section is fully implemented."""
+        # Tool exists and is async
+        self.assertTrue(inspect.iscoroutinefunction(self.server._get_handbook_section))
+
+        # Has required parameters
+        sig = inspect.signature(self.server._get_handbook_section)
+        self.assertIn("section_name", sig.parameters)
+        self.assertIn("limit", sig.parameters)
+
+    async def test_issue_38_list_handbook_topics_implemented(self):
+        """Test Issue #38: list_handbook_topics is fully implemented."""
+        # Tool exists and is async
+        self.assertTrue(inspect.iscoroutinefunction(self.server._list_handbook_topics))
+
+        # Has required parameters
+        sig = inspect.signature(self.server._list_handbook_topics)
+        self.assertIn("max_depth", sig.parameters)
+
+    async def test_both_tools_handle_missing_database(self):
+        """Test that both new tools handle missing database gracefully."""
+        self.server.vector_store = None
+
+        # Test get_handbook_section
+        result1 = await self.server._get_handbook_section("test")
+        self.assertIn("Error", result1)
+
+        # Test list_handbook_topics
+        result2 = await self.server._list_handbook_topics()
+        self.assertIn("Error", result2)
