@@ -1026,7 +1026,7 @@ class TestListHandbookTopics(unittest.IsolatedAsyncioTestCase):
 
             # Verify counts are correct
             self.assertIn("section_a (3 chunks)", result)
-            self.assertIn("section_b (1 chunks)", result)
+            self.assertIn("section_b (1 chunk)", result)
 
 
 class TestContentRetrievalToolsIntegration(unittest.IsolatedAsyncioTestCase):
