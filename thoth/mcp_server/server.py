@@ -1008,9 +1008,15 @@ class ThothMCPServer:
         except GitCommandError as e:
             logger.exception("Git command error")
             return f"Error accessing git repository: {e!s}"
-        except (ValueError, RuntimeError, OSError) as e:
-            logger.exception("Error getting recent updates")
-            return f"Error retrieving recent updates: {e!s}"
+        except ValueError as e:
+            logger.exception("Invalid parameters for recent updates request")
+            return f"Invalid parameters for recent updates: {e!s}"
+        except RuntimeError as e:
+            logger.exception("Runtime error while getting recent updates")
+            return f"Error retrieving recent updates due to an internal issue: {e!s}"
+        except OSError as e:
+            logger.exception("File system or OS error while accessing repository for recent updates")
+            return f"File system error while retrieving recent updates: {e!s}"
 
     async def run(self) -> None:
         """Run the MCP server with stdio transport."""
