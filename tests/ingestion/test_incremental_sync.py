@@ -39,9 +39,14 @@ class TestIncrementalSync:
         # Create a mock repository
         with patch("thoth.ingestion.repo_manager.Repo") as mock_repo:
             mock_git = Mock()
+            # fmt: off
             mock_git.diff.return_value = (
-                "A\tdocs/new.md\nM\tdocs/modified.md\nD\tdocs/deleted.md\nR100\told_name.md\tnew_name.md"
+                "A\tdocs/new.md\n"
+                "M\tdocs/modified.md\n"
+                "D\tdocs/deleted.md\n"
+                "R100\told_name.md\tnew_name.md"
             )
+            # fmt: on
             mock_repo.return_value.git = mock_git
 
             result = manager.get_file_changes("abc123")
