@@ -880,7 +880,7 @@ class ThothMCPServer:
         lines.append(f"Author: {commit.author.name} <{commit.author.email}>")
 
         # Add commit message (first line only for brevity)
-        message = commit.message.split("\n")[0].strip()
+        message = (commit.message or "").split("\n", 1)[0].strip() or "(no message)"
         lines.append(f"Message: {message}")
         lines.append(f"Files changed: {len(changed_files)}")
 
