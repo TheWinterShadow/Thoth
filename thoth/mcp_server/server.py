@@ -761,7 +761,8 @@ class ThothMCPServer:
             # Sort sections alphabetically for consistent output
             for section in sorted(section_counts.keys()):
                 count = section_counts[section]
-                result_lines.append(f"  - {section} ({count} chunks)")
+                chunk_label = "chunk" if count == 1 else "chunks"
+                result_lines.append(f"  - {section} ({count} {chunk_label})")
 
             # Add summary
             result_lines.extend(
