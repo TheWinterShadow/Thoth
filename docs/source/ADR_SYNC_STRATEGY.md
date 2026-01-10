@@ -119,15 +119,30 @@ The `IngestionPipeline` handles three types of changes:
 #### File Status Detection
 Using Git's capabilities to classify files:
 ```python
-# Get all changed files
-changed_files = repo.git.diff("--name-only", since_commit, "HEAD")
+# Get changed files with their status codes between two commits
+diff_output = repo.git.diff("--name-status", since_commit, "HEAD")
 
-# Detect deleted files (in old commit but not in current)
-all_files_old = {f for f in old_tree}
-all_files_new = {f for f in new_tree}
-deleted = all_files_old - all_files_new
-added = all_files_new - all_files_old
-modified = changed_files - added - deleted
+# Initialize sets for each type of change
+added: set[str] = set()
+modified: set[str] = set()
+deleted: set[str] = set()
+renamed: set[str] = set()
+copied: set[str] = set()
+
+for line in diff_output.splitlines():
+    # Format: "<status>\t<path>" or "<status>\t<old_path>\t<new_path>" for renames/copies
+    status, *paths = line.split("\t")
+
+    if status.startswith("A"):  # Added
+        added.add(paths[-1])
+    elif status.startswith("M"):  # Modified
+        modified.add(paths[-1])
+    elif status.startswith("D"):  # Deleted
+        deleted.add(paths[-1])
+    elif status.startswith("R"):  # Renamed
+        renamed.add(paths[-1])
+    elif status.startswith("C"):  # Copied
+        copied.add(paths[-1])
 ```
 
 #### Vector Store Updates
