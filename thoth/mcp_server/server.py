@@ -20,7 +20,7 @@ Example:
 
     Or programmatically:
         >>> from thoth.mcp_server.server import ThothMCPServer
-        >>> server = ThothMCPServer(handbook_db_path='./handbook_vectors')
+        >>> server = ThothMCPServer(handbook_db_path="./handbook_vectors")
         >>> await server.run()
 """
 
@@ -77,7 +77,7 @@ class ThothMCPServer:
         >>> server = ThothMCPServer(
         ...     name="my-handbook-server",
         ...     version="1.0.0",
-        ...     handbook_db_path="./my_handbook_db"
+        ...     handbook_db_path="./my_handbook_db",
         ... )
         >>> await server.run()
     """
@@ -370,7 +370,7 @@ class ThothMCPServer:
                 ValueError: If the tool name is not recognized
 
             Example:
-                >>> await call_tool('ping', {'message': 'test'})
+                >>> await call_tool("ping", {"message": "test"})
                 [TextContent(type='text', text='pong: test')]
             """
             logger.info("Calling tool: %s with arguments: %s", name, arguments)
@@ -602,9 +602,7 @@ class ThothMCPServer:
 
         Example:
             >>> result = await server._search_handbook(
-            ...     query="authentication process",
-            ...     n_results=3,
-            ...     filter_section="security"
+            ...     query="authentication process", n_results=3, filter_section="security"
             ... )
             >>> print(result)
             Search Results for: 'authentication process'
@@ -696,8 +694,7 @@ class ThothMCPServer:
 
         Example:
             >>> result = await server._get_handbook_section(
-            ...     section_name="introduction",
-            ...     limit=10
+            ...     section_name="introduction", limit=10
             ... )
             >>> print(result)
             Handbook Section: 'introduction'
@@ -919,9 +916,7 @@ class ThothMCPServer:
 
         Example:
             >>> result = await server._get_recent_updates(
-            ...     days=7,
-            ...     path_filter="content/",
-            ...     max_commits=10
+            ...     days=7, path_filter="content/", max_commits=10
             ... )
             >>> print(result)
             Recent Handbook Updates (Last 7 days)

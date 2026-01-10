@@ -27,7 +27,7 @@ Example:
     >>>
     >>> logger = setup_logger("myapp", level=logging.INFO)
     >>> logger.info("User password is secret123")  # Logs: "User password is [REDACTED]"
-    >>> logger.info("API key: abc123def")          # Logs: "API key: [REDACTED]"
+    >>> logger.info("API key: abc123def")  # Logs: "API key: [REDACTED]"
 """
 
 from logging import INFO, NOTSET, Formatter, Logger, LogRecord, StreamHandler, getLogger
@@ -62,7 +62,9 @@ class SensitiveDataFormatter(Formatter):
 
     Example:
         >>> formatter = SensitiveDataFormatter("%(levelname)s: %(message)s")
-        >>> record = logging.LogRecord("test", logging.INFO, "", 0, "password is secret", (), None)
+        >>> record = logging.LogRecord(
+        ...     "test", logging.INFO, "", 0, "password is secret", (), None
+        ... )
         >>> formatted = formatter.format(record)
         >>> print(formatted)  # "INFO: password is [REDACTED]"
     """
