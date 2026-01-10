@@ -307,9 +307,9 @@ class IngestionPipeline:
                 if file_path in self.state.processed_files:
                     self.state.processed_files.remove(file_path)
 
-                # Update statistics
-                self.state.total_chunks -= deleted_count
-                self.state.total_documents -= deleted_count
+                # Update statistics, ensuring counters do not go negative
+                self.state.total_chunks = max(0, self.state.total_chunks - deleted_count)
+                self.state.total_documents = max(0, self.state.total_documents - deleted_count)
 
                 self.logger.info(
                     "Deleted %d documents for removed file: %s",
