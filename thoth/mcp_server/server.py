@@ -95,12 +95,16 @@ class ThothMCPServer:
             name: Server name identifier
             version: Server version
             handbook_db_path: Path to the handbook vector database
-            handbook_repo_path: Path to the handbook git repository
+            handbook_repo_path: Path to the handbook git repository. If not
+                provided, defaults to ``~/.thoth/handbook``. When using the
+                default, the directory (and any missing parents) will be
+                created automatically if it does not already exist.
         """
         self.name = name
         self.version = version
         self.handbook_db_path = handbook_db_path
         self.handbook_repo_path = handbook_repo_path or str(Path.home() / ".thoth" / "handbook")
+        Path(self.handbook_repo_path).mkdir(parents=True, exist_ok=True)
         self.server = Server(name)
 
         # Initialize search cache (max 100 entries)
