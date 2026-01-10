@@ -894,7 +894,7 @@ class ThothMCPServer:
         lines.append("")
         return lines
 
-    async def _get_recent_updates(  # noqa: PLR0911
+    async def _get_recent_updates(  # noqa: PLR0911, PLR0912
         self, days: int = 7, path_filter: str | None = None, max_commits: int = 20
     ) -> str:
         """Get recent updates from the handbook repository.
