@@ -25,10 +25,13 @@ Example:
 """
 
 import asyncio
+from datetime import datetime, timedelta, timezone
+from fnmatch import fnmatch
 from pathlib import Path
 import time
 from typing import Any
 
+from git import GitCommandError, InvalidGitRepositoryError, Repo
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import (
@@ -84,6 +87,7 @@ class ThothMCPServer:
         name: str = "thoth-server",
         version: str = "1.0.0",
         handbook_db_path: str = "./handbook_vectors",
+        handbook_repo_path: str | None = None,
     ):
         """Initialize the Thoth MCP Server.
 
@@ -91,10 +95,16 @@ class ThothMCPServer:
             name: Server name identifier
             version: Server version
             handbook_db_path: Path to the handbook vector database
+            handbook_repo_path: Path to the handbook git repository. If not
+                provided, defaults to ``~/.thoth/handbook``. When using the
+                default, the directory (and any missing parents) will be
+                created automatically if it does not already exist.
         """
         self.name = name
         self.version = version
         self.handbook_db_path = handbook_db_path
+        self.handbook_repo_path = handbook_repo_path or str(Path.home() / ".thoth" / "handbook")
+        Path(self.handbook_repo_path).mkdir(parents=True, exist_ok=True)
         self.server = Server(name)
 
         # Initialize search cache (max 100 entries)
@@ -294,6 +304,44 @@ class ThothMCPServer:
                     )
                 )
 
+                tools.append(
+                    Tool(
+                        name="get_recent_updates",
+                        description=(
+                            "Track recent changes in the handbook repository. "
+                            "Returns commit history with changed files, dates, and commit messages. "
+                            "Supports filtering by date range and file path patterns."
+                        ),
+                        inputSchema={
+                            "type": "object",
+                            "properties": {
+                                "days": {
+                                    "type": "integer",
+                                    "description": "Number of days to look back for changes (default: 7, max: 90)",
+                                    "default": 7,
+                                    "minimum": 1,
+                                    "maximum": 90,
+                                },
+                                "path_filter": {
+                                    "type": "string",
+                                    "description": (
+                                        "Optional path pattern to filter changes (e.g., 'content/', '*.md'). "
+                                        "Uses glob-like matching."
+                                    ),
+                                },
+                                "max_commits": {
+                                    "type": "integer",
+                                    "description": "Maximum number of commits to return (default: 20, max: 100)",
+                                    "default": 20,
+                                    "minimum": 1,
+                                    "maximum": 100,
+                                },
+                            },
+                            "required": [],
+                        },
+                    )
+                )
+
             return tools
 
         # Register call_tool handler - executes tools by name
@@ -384,6 +432,15 @@ class ThothMCPServer:
                 # List available topics
                 result = await self._list_handbook_topics(
                     max_depth=arguments.get("max_depth", 2),
+                )
+                return [TextContent(type="text", text=result)]
+
+            # Handle get_recent_updates tool - track recent changes
+            if name == "get_recent_updates":
+                result = await self._get_recent_updates(
+                    days=arguments.get("days", 7),
+                    path_filter=arguments.get("path_filter"),
+                    max_commits=arguments.get("max_commits", 20),
                 )
                 return [TextContent(type="text", text=result)]
 
@@ -779,6 +836,191 @@ class ThothMCPServer:
         except (ValueError, RuntimeError, KeyError) as e:
             logger.exception("Error listing topics")
             return f"Error listing handbook topics: {e!s}"
+
+    def _validate_repo_path(self, repo_path: Path) -> str | None:
+        """Validate repository path and return error message if invalid."""
+        if not repo_path.exists():
+            return (
+                f"Error: Handbook repository not found at {repo_path}. "
+                "Please clone the repository first using the ingestion pipeline."
+            )
+        return None
+
+    def _open_git_repo(self, repo_path: Path) -> Repo | str:
+        """Open git repository and return repo or error message."""
+        try:
+            return Repo(str(repo_path))
+        except InvalidGitRepositoryError:
+            return f"Error: Invalid git repository at {repo_path}. The directory exists but not a valid git repository."
+
+    def _get_changed_files_for_commit(self, commit: Any) -> list[str]:
+        """Extract changed files from a commit."""
+        if commit.parents:
+            # Get diff with parent commit
+            parent = commit.parents[0]
+            diffs = parent.diff(commit)
+            return [diff.b_path or diff.a_path for diff in diffs]
+        # First commit - list all files
+        return list(commit.stats.files.keys())
+
+    def _apply_path_filter(self, files: list[str], path_filter: str) -> list[str]:
+        """Filter files by path pattern using glob matching or substring."""
+        return [f for f in files if fnmatch(f, path_filter) or path_filter in f]
+
+    def _format_commit_details(self, commit: Any, changed_files: list[str], index: int, total: int) -> list[str]:
+        """Format commit details as list of strings."""
+        lines = [
+            f"--- Commit {index}/{total} ---",
+            f"SHA: {commit.hexsha[:8]}",
+        ]
+
+        # Format commit date
+        commit_date = datetime.fromtimestamp(commit.committed_date, tz=timezone.utc)
+        lines.append(f"Date: {commit_date.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+        lines.append(f"Author: {commit.author.name} <{commit.author.email}>")
+
+        # Add commit message (first line only for brevity)
+        message = (commit.message or "").split("\n", 1)[0].strip() or "(no message)"
+        lines.append(f"Message: {message}")
+        lines.append(f"Files changed: {len(changed_files)}")
+
+        # List changed files (limit to first 10 to avoid overwhelming output)
+        if changed_files:
+            lines.append("Changed files:")
+            lines.extend(f"  - {file_path}" for file_path in changed_files[:10])
+            if len(changed_files) > 10:
+                lines.append(f"  ... and {len(changed_files) - 10} more files")
+
+        lines.append("")
+        return lines
+
+    async def _get_recent_updates(  # noqa: PLR0911, PLR0912
+        self, days: int = 7, path_filter: str | None = None, max_commits: int = 20
+    ) -> str:
+        """Get recent updates from the handbook repository.
+
+        Retrieves commit history from the git repository showing recent changes,
+        with optional filtering by date range and file paths.
+
+        Args:
+            days: Number of days to look back (default: 7, max: 90)
+                 Clamped to range [1, 90]
+            path_filter: Optional path pattern to filter files (e.g., 'content/', '*.md')
+                        Uses simple substring matching and glob patterns
+            max_commits: Maximum number of commits to return (default: 20, max: 100)
+                        Clamped to range [1, 100]
+
+        Returns:
+            Formatted string containing:
+                - Summary of changes (commits, files changed)
+                - List of commits with date, author, message
+                - Changed files for each commit
+                OR error message if repository not available
+
+        Example:
+            >>> result = await server._get_recent_updates(
+            ...     days=7,
+            ...     path_filter="content/",
+            ...     max_commits=10
+            ... )
+            >>> print(result)
+            Recent Handbook Updates (Last 7 days)
+            Found 5 commits affecting 15 files
+            ...
+        """
+        try:
+            # Validate and clamp parameters
+            days = max(1, min(days, 90))
+            max_commits = max(1, min(max_commits, 100))
+
+            # Check if repository exists
+            repo_path = Path(self.handbook_repo_path)
+            error = self._validate_repo_path(repo_path)
+            if error:
+                return error
+
+            # Open the git repository
+            repo = self._open_git_repo(repo_path)
+            if isinstance(repo, str):
+                return repo
+
+            # Calculate the date threshold
+            since_date = datetime.now(timezone.utc) - timedelta(days=days)
+
+            # Get commits since the date threshold
+            commits = list(
+                repo.iter_commits(
+                    "HEAD",
+                    max_count=max_commits,
+                    since=since_date,
+                )
+            )
+
+            if not commits:
+                return f"No commits found in the last {days} days. The repository may be outdated or not initialized."
+
+            # Build the results
+            result_lines = [
+                f"Recent Handbook Updates (Last {days} days)",
+                f"Repository: {repo_path}",
+                "",
+            ]
+
+            # Track statistics
+            total_files_changed = set()
+            commits_with_filter = []
+
+            # Process each commit
+            for commit in commits:
+                changed_files = self._get_changed_files_for_commit(commit)
+
+                # Apply path filter if specified
+                if path_filter:
+                    changed_files = self._apply_path_filter(changed_files, path_filter)
+                    if not changed_files:
+                        continue
+
+                commits_with_filter.append((commit, changed_files))
+                total_files_changed.update(changed_files)
+
+            # Check if any commits match the filter
+            if not commits_with_filter:
+                filter_msg = f" matching '{path_filter}'" if path_filter else ""
+                return (
+                    f"No changes found in the last {days} days{filter_msg}. "
+                    "Try adjusting the date range or path filter."
+                )
+
+            # Add summary
+            result_lines.append(f"Found {len(commits_with_filter)} commits affecting {len(total_files_changed)} files")
+            if path_filter:
+                result_lines.append(f"Filter: {path_filter}")
+            result_lines.append("")
+
+            # Add commit details
+            for i, (commit, changed_files) in enumerate(commits_with_filter, 1):
+                result_lines.extend(self._format_commit_details(commit, changed_files, i, len(commits_with_filter)))
+
+            logger.info(
+                "Retrieved %d commits from last %d days",
+                len(commits_with_filter),
+                days,
+            )
+
+            return "\n".join(result_lines)
+
+        except GitCommandError as e:
+            logger.exception("Git command error")
+            return f"Error accessing git repository: {e!s}"
+        except ValueError as e:
+            logger.exception("Invalid parameters for recent updates request")
+            return f"Invalid parameters for recent updates: {e!s}"
+        except RuntimeError as e:
+            logger.exception("Runtime error while getting recent updates")
+            return f"Error retrieving recent updates due to an internal issue: {e!s}"
+        except OSError as e:
+            logger.exception("File system or OS error while accessing repository for recent updates")
+            return f"File system error while retrieving recent updates: {e!s}"
 
     async def run(self) -> None:
         """Run the MCP server with stdio transport."""

@@ -8,6 +8,7 @@
 
    .. autosummary::
    
+      fnmatch
       invoker
       run_server
       setup_logger
@@ -19,9 +20,20 @@
    
       Any
       Path
+      Repo
       Server
       TextContent
       ThothMCPServer
       Tool
       VectorStore
+      datetime
+      timedelta
+      timezone
+   
+   .. rubric:: Exceptions
+
+   .. autosummary::
+   
+      GitCommandError
+      InvalidGitRepositoryError
    
