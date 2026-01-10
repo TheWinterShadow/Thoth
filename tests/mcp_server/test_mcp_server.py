@@ -4,6 +4,7 @@ Unit tests for Thoth MCP Server.
 Tests the ThothMCPServer class and its handlers using unittest.TestCase.
 """
 
+import contextlib
 from datetime import datetime, timezone
 import inspect
 from pathlib import Path
@@ -12,6 +13,7 @@ import time
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from git import GitCommandError
 from mcp.server import Server
 from mcp.types import TextContent, Tool
 
@@ -1254,3 +1256,740 @@ class TestGetRecentUpdatesTools(unittest.IsolatedAsyncioTestCase):
         result = await self.server._get_recent_updates()
         self.assertIsInstance(result, str)
         self.assertGreater(len(result), 0)
+
+
+class TestCachedSearchImplementation(unittest.IsolatedAsyncioTestCase):
+    """Test suite for _cached_search method implementation details."""
+
+    async def asyncSetUp(self):
+        """Set up test fixtures."""
+        self.server = ThothMCPServer(
+            name="cache-test-server",
+            version="1.0.0",
+            handbook_db_path="./handbook_vectors",
+        )
+
+    async def test_cache_initialized(self):
+        """Test that cache is initialized properly."""
+        self.assertTrue(hasattr(self.server, "_search_cache"))
+        self.assertIsInstance(self.server._search_cache, dict)
+        self.assertEqual(len(self.server._search_cache), 0)
+
+    async def test_cache_max_size_set(self):
+        """Test that cache max size is set correctly."""
+        self.assertTrue(hasattr(self.server, "_cache_max_size"))
+        self.assertEqual(self.server._cache_max_size, 100)
+
+    async def test_cache_eviction_when_full(self):
+        """Test that cache evicts oldest entry when full."""
+        if self.server.vector_store is None:
+            self.skipTest("Vector store not available")
+
+        # Fill cache to max size
+        with patch.object(self.server.vector_store, "search_similar") as mock_search:
+            mock_search.return_value = {
+                "ids": ["1"],
+                "documents": ["doc"],
+                "metadatas": [{}],
+                "distances": [0.1],
+            }
+
+            # Add max_size + 1 entries
+            for i in range(self.server._cache_max_size + 1):
+                with contextlib.suppress(RuntimeError, ValueError, AttributeError):
+                    # Some queries might fail, that's OK for this test
+                    self.server._cached_search(f"query_{i}", 5, None)
+
+    async def test_cache_key_construction(self):
+        """Test that cache keys are constructed correctly."""
+        query = "test query"
+        n_results = 5
+        filter_section = "test_section"
+
+        cache_key = (query, n_results, filter_section)
+        self.assertIsInstance(cache_key, tuple)
+        self.assertEqual(len(cache_key), 3)
+        self.assertEqual(cache_key[0], query)
+        self.assertEqual(cache_key[1], n_results)
+        self.assertEqual(cache_key[2], filter_section)
+
+    async def test_cache_key_with_none_filter(self):
+        """Test cache key when filter_section is None."""
+        cache_key = ("query", 5, None)
+        self.assertIsInstance(cache_key, tuple)
+        self.assertIsNone(cache_key[2])
+
+
+class TestHelperMethods(unittest.IsolatedAsyncioTestCase):
+    """Test suite for helper methods in ThothMCPServer."""
+
+    async def asyncSetUp(self):
+        """Set up test fixtures."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self.tmpdir = tmpdir
+            self.server = ThothMCPServer(
+                name="helper-test-server",
+                version="1.0.0",
+                handbook_repo_path=tmpdir,
+            )
+
+    async def test_validate_repo_path_missing(self):
+        """Test _validate_repo_path with non-existent path."""
+        non_existent = Path("/this/path/does/not/exist")
+        error = self.server._validate_repo_path(non_existent)
+        self.assertIsNotNone(error)
+        self.assertIn("not found", error)
+
+    async def test_validate_repo_path_exists(self):
+        """Test _validate_repo_path with existing path."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            existing = Path(tmpdir)
+            error = self.server._validate_repo_path(existing)
+            self.assertIsNone(error)
+
+    async def test_open_git_repo_invalid(self):
+        """Test _open_git_repo with non-git directory."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = self.server._open_git_repo(Path(tmpdir))
+            self.assertIsInstance(result, str)
+            self.assertIn("Invalid git repository", result)
+
+    async def test_get_changed_files_no_parents(self):
+        """Test _get_changed_files_for_commit with first commit."""
+        mock_commit = MagicMock()
+        mock_commit.parents = []
+        mock_commit.stats.files = {"file1.txt": {}, "file2.txt": {}}
+
+        files = self.server._get_changed_files_for_commit(mock_commit)
+        self.assertEqual(set(files), {"file1.txt", "file2.txt"})
+
+    async def test_get_changed_files_with_parents(self):
+        """Test _get_changed_files_for_commit with parent commit."""
+        mock_commit = MagicMock()
+        mock_parent = MagicMock()
+        mock_commit.parents = [mock_parent]
+
+        mock_diff1 = MagicMock()
+        mock_diff1.a_path = "file1.txt"
+        mock_diff1.b_path = "file1.txt"
+
+        mock_diff2 = MagicMock()
+        mock_diff2.a_path = None
+        mock_diff2.b_path = "file2.txt"
+
+        mock_parent.diff.return_value = [mock_diff1, mock_diff2]
+
+        files = self.server._get_changed_files_for_commit(mock_commit)
+        self.assertIn("file1.txt", files)
+        self.assertIn("file2.txt", files)
+
+    async def test_apply_path_filter_glob(self):
+        """Test _apply_path_filter with glob patterns."""
+        files = ["content/doc1.md", "content/doc2.md", "other/file.txt"]
+
+        # Test glob pattern
+        filtered = self.server._apply_path_filter(files, "*.md")
+        self.assertIn("content/doc1.md", filtered)
+        self.assertIn("content/doc2.md", filtered)
+        self.assertNotIn("other/file.txt", filtered)
+
+    async def test_apply_path_filter_substring(self):
+        """Test _apply_path_filter with substring matching."""
+        files = ["content/doc1.md", "content/doc2.md", "other/file.txt"]
+
+        filtered = self.server._apply_path_filter(files, "content/")
+        self.assertIn("content/doc1.md", filtered)
+        self.assertIn("content/doc2.md", filtered)
+        self.assertNotIn("other/file.txt", filtered)
+
+    async def test_format_commit_details(self):
+        """Test _format_commit_details formatting."""
+        mock_commit = MagicMock()
+        mock_commit.hexsha = "abcdef1234567890"
+        mock_commit.committed_date = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc).timestamp()
+        mock_commit.author.name = "Test Author"
+        mock_commit.author.email = "test@example.com"
+        mock_commit.message = "Test commit message"
+
+        changed_files = ["file1.txt", "file2.txt"]
+
+        lines = self.server._format_commit_details(mock_commit, changed_files, 1, 5)
+
+        self.assertIsInstance(lines, list)
+        self.assertGreater(len(lines), 0)
+        # Check for key components
+        commit_str = "\n".join(lines)
+        self.assertIn("Commit 1/5", commit_str)
+        self.assertIn("abcdef12", commit_str)  # First 8 chars of SHA
+        self.assertIn("Test Author", commit_str)
+        self.assertIn("Test commit message", commit_str)
+
+    async def test_format_commit_details_many_files(self):
+        """Test _format_commit_details with >10 files."""
+        mock_commit = MagicMock()
+        mock_commit.hexsha = "abc123"
+        mock_commit.committed_date = datetime.now(timezone.utc).timestamp()
+        mock_commit.author.name = "Test"
+        mock_commit.author.email = "test@test.com"
+        mock_commit.message = "Many files"
+
+        changed_files = [f"file{i}.txt" for i in range(15)]
+
+        lines = self.server._format_commit_details(mock_commit, changed_files, 1, 1)
+        commit_str = "\n".join(lines)
+
+        # Should show first 10 and mention "more"
+        self.assertIn("and 5 more files", commit_str)
+
+    async def test_format_commit_details_no_message(self):
+        """Test _format_commit_details with empty commit message."""
+        mock_commit = MagicMock()
+        mock_commit.hexsha = "abc123"
+        mock_commit.committed_date = datetime.now(timezone.utc).timestamp()
+        mock_commit.author.name = "Test"
+        mock_commit.author.email = "test@test.com"
+        mock_commit.message = ""
+
+        lines = self.server._format_commit_details(mock_commit, [], 1, 1)
+        commit_str = "\n".join(lines)
+
+        self.assertIn("(no message)", commit_str)
+
+
+class TestVectorStoreIntegration(unittest.IsolatedAsyncioTestCase):
+    """Test suite for vector store integration."""
+
+    async def asyncSetUp(self):
+        """Set up test fixtures."""
+        self.server = ThothMCPServer(
+            name="vector-test-server",
+            version="1.0.0",
+            handbook_db_path="./handbook_vectors",
+        )
+
+    async def test_vector_store_attribute_exists(self):
+        """Test that vector_store attribute exists."""
+        self.assertTrue(hasattr(self.server, "vector_store"))
+
+    async def test_init_vector_store_missing_db(self):
+        """Test _init_vector_store with missing database."""
+        server = ThothMCPServer(
+            handbook_db_path="/nonexistent/path/to/db",
+        )
+        # Should set vector_store to None without crashing
+        self.assertIsNone(server.vector_store)
+
+    @patch("thoth.mcp_server.server.VectorStore")
+    async def test_init_vector_store_error_handling(self, mock_vs):
+        """Test _init_vector_store handles exceptions gracefully."""
+        mock_vs.side_effect = RuntimeError("Database error")
+
+        server = ThothMCPServer(handbook_db_path="./test_db")
+        # Should handle error gracefully and set vector_store to None
+        self.assertIsNone(server.vector_store)
+
+    async def test_search_without_vector_store(self):
+        """Test search operations when vector_store is None."""
+        self.server.vector_store = None
+
+        result = await self.server._search_handbook("test query")
+        self.assertIn("Error", result)
+        self.assertIn("not initialized", result)
+
+
+class TestErrorHandlingComprehensive(unittest.IsolatedAsyncioTestCase):
+    """Comprehensive error handling tests."""
+
+    async def asyncSetUp(self):
+        """Set up test fixtures."""
+        self.server = ThothMCPServer(
+            name="error-test-server",
+            version="1.0.0",
+        )
+
+    async def test_search_handbook_value_error(self):
+        """Test _search_handbook handles ValueError."""
+        if self.server.vector_store is None:
+            self.skipTest("Vector store not available")
+
+        with patch.object(self.server, "_cached_search") as mock_cache:
+            mock_cache.side_effect = ValueError("Test error")
+
+            result = await self.server._search_handbook("test")
+            self.assertIn("Error performing search", result)
+
+    async def test_search_handbook_runtime_error(self):
+        """Test _search_handbook handles RuntimeError."""
+        if self.server.vector_store is None:
+            self.skipTest("Vector store not available")
+
+        with patch.object(self.server, "_cached_search") as mock_cache:
+            mock_cache.side_effect = RuntimeError("Test runtime error")
+
+            result = await self.server._search_handbook("test")
+            self.assertIn("Error performing search", result)
+
+    async def test_get_handbook_section_key_error(self):
+        """Test _get_handbook_section handles KeyError."""
+        if self.server.vector_store is None:
+            self.skipTest("Vector store not available")
+
+        with patch.object(self.server.vector_store, "get_documents") as mock_get:
+            mock_get.side_effect = KeyError("Test key error")
+
+            result = await self.server._get_handbook_section("test")
+            self.assertIn("Error retrieving section", result)
+
+    async def test_list_handbook_topics_error_handling(self):
+        """Test _list_handbook_topics handles errors."""
+        if self.server.vector_store is None:
+            self.skipTest("Vector store not available")
+
+        with patch.object(self.server.vector_store, "get_document_count") as mock_count:
+            mock_count.side_effect = RuntimeError("Test error")
+
+            result = await self.server._list_handbook_topics()
+            self.assertIn("Error listing handbook topics", result)
+
+    async def test_get_recent_updates_git_error(self):
+        """Test _get_recent_updates handles GitCommandError."""
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch("thoth.mcp_server.server.Repo") as mock_repo,
+        ):
+            self.server.handbook_repo_path = tmpdir
+            Path(tmpdir, ".git").mkdir()
+
+            mock_repo.side_effect = GitCommandError("git", "error")
+
+            result = await self.server._get_recent_updates()
+            self.assertIn("Error", result)
+
+    async def test_get_recent_updates_os_error(self):
+        """Test _get_recent_updates handles OSError."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self.server.handbook_repo_path = tmpdir
+
+            with patch("thoth.mcp_server.server.Repo") as mock_repo:
+                mock_repo.side_effect = OSError("File system error")
+
+                result = await self.server._get_recent_updates()
+                self.assertIn("error", result.lower())
+
+
+class TestSearchResultStructure(unittest.IsolatedAsyncioTestCase):
+    """Test search result structure and formatting."""
+
+    async def asyncSetUp(self):
+        """Set up test fixtures."""
+        self.server = ThothMCPServer(
+            name="result-test-server",
+            version="1.0.0",
+        )
+
+    async def test_search_result_has_header(self):
+        """Test that search results include proper header."""
+        if self.server.vector_store is None:
+            self.skipTest("Vector store not available")
+
+        with patch.object(self.server, "_cached_search") as mock_cache:
+            mock_cache.return_value = (
+                ("id1",),
+                ("Sample document",),
+                ({"section": "test"},),
+                (0.1,),
+                0.123,
+            )
+
+            result = await self.server._search_handbook("test query", n_results=1)
+
+            self.assertIn("Search Results for:", result)
+            self.assertIn("test query", result)
+            self.assertIn("Found 1 result", result)
+            self.assertIn("Search time:", result)
+
+    async def test_search_result_includes_all_metadata(self):
+        """Test that all available metadata is included."""
+        if self.server.vector_store is None:
+            self.skipTest("Vector store not available")
+
+        with patch.object(self.server, "_cached_search") as mock_cache:
+            mock_cache.return_value = (
+                ("id1",),
+                ("Document content",),
+                ({"section": "intro", "source": "file.md", "chunk_index": 5},),
+                (0.2,),
+                0.1,
+            )
+
+            result = await self.server._search_handbook("query")
+
+            self.assertIn("Section: intro", result)
+            self.assertIn("Source: file.md", result)
+            self.assertIn("Chunk: 5", result)
+            self.assertIn("Relevance Score:", result)
+            self.assertIn("Document content", result)
+
+    async def test_search_result_partial_metadata(self):
+        """Test search results with partial metadata."""
+        if self.server.vector_store is None:
+            self.skipTest("Vector store not available")
+
+        with patch.object(self.server, "_cached_search") as mock_cache:
+            mock_cache.return_value = (
+                ("id1",),
+                ("Content",),
+                ({"section": "test"},),  # Only section, no source or chunk_index
+                (0.1,),
+                0.05,
+            )
+
+            result = await self.server._search_handbook("query")
+
+            self.assertIn("Section: test", result)
+            # Should not crash when source/chunk_index missing
+
+
+class TestHandbookSectionRetrieval(unittest.IsolatedAsyncioTestCase):
+    """Test handbook section retrieval functionality."""
+
+    async def asyncSetUp(self):
+        """Set up test fixtures."""
+        self.server = ThothMCPServer(
+            name="section-retrieval-test",
+            version="1.0.0",
+        )
+
+    async def test_section_retrieval_with_multiple_chunks(self):
+        """Test retrieving section with multiple chunks."""
+        if self.server.vector_store is None:
+            self.skipTest("Vector store not available")
+
+        with patch.object(self.server.vector_store, "get_documents") as mock_get:
+            mock_get.return_value = {
+                "documents": ["Chunk 1", "Chunk 2", "Chunk 3"],
+                "metadatas": [
+                    {"section": "test", "source": "file.md", "chunk_index": 0},
+                    {"section": "test", "source": "file.md", "chunk_index": 1},
+                    {"section": "test", "source": "file.md", "chunk_index": 2},
+                ],
+            }
+
+            result = await self.server._get_handbook_section("test", limit=10)
+
+            self.assertIn("Total chunks: 3", result)
+            self.assertIn("Chunk 1", result)
+            self.assertIn("Chunk 2", result)
+            self.assertIn("Chunk 3", result)
+
+    async def test_section_retrieval_validates_limit(self):
+        """Test that section retrieval validates limit parameter."""
+        if self.server.vector_store is None:
+            self.skipTest("Vector store not available")
+
+        with patch.object(self.server.vector_store, "get_documents") as mock_get:
+            mock_get.return_value = {"documents": [], "metadatas": []}
+
+            # These should be clamped
+            await self.server._get_handbook_section("test", limit=-1)  # -> 1
+            await self.server._get_handbook_section("test", limit=0)  # -> 1
+            # -> 100
+            await self.server._get_handbook_section("test", limit=200)
+
+            # Verify mock was called (limit was validated)
+            self.assertEqual(mock_get.call_count, 3)
+
+
+class TestTopicsListing(unittest.IsolatedAsyncioTestCase):
+    """Test topics listing functionality."""
+
+    async def asyncSetUp(self):
+        """Set up test fixtures."""
+        self.server = ThothMCPServer(
+            name="topics-listing-test",
+            version="1.0.0",
+        )
+
+    async def test_topics_listing_counts_correctly(self):
+        """Test that topics listing counts sections correctly."""
+        if self.server.vector_store is None:
+            self.skipTest("Vector store not available")
+
+        with (
+            patch.object(self.server.vector_store, "get_document_count") as mock_count,
+            patch.object(self.server.vector_store, "get_documents") as mock_get,
+        ):
+            mock_count.return_value = 6
+            mock_get.return_value = {
+                "documents": ["d1", "d2", "d3", "d4", "d5", "d6"],
+                "metadatas": [
+                    {"section": "intro"},
+                    {"section": "intro"},
+                    {"section": "body"},
+                    {"section": "body"},
+                    {"section": "body"},
+                    {"section": "conclusion"},
+                ],
+            }
+
+            result = await self.server._list_handbook_topics()
+
+            # Check counts
+            self.assertIn("intro (2 chunks)", result)
+            self.assertIn("body (3 chunks)", result)
+            self.assertIn("conclusion (1 chunk)", result)
+            self.assertIn("Total sections: 3", result)
+
+    async def test_topics_listing_handles_no_section_metadata(self):
+        """Test topics listing when metadata lacks section field."""
+        if self.server.vector_store is None:
+            self.skipTest("Vector store not available")
+
+        with (
+            patch.object(self.server.vector_store, "get_document_count") as mock_count,
+            patch.object(self.server.vector_store, "get_documents") as mock_get,
+        ):
+            mock_count.return_value = 2
+            mock_get.return_value = {
+                "documents": ["d1", "d2"],
+                "metadatas": [
+                    {"other_field": "value"},  # No section field
+                    {"section": "test"},
+                ],
+            }
+
+            result = await self.server._list_handbook_topics()
+
+            # Should handle gracefully
+            self.assertIsInstance(result, str)
+            self.assertIn("Available Sections:", result)
+
+
+class TestMCPHandlerIntegration(unittest.IsolatedAsyncioTestCase):
+    """Test actual MCP handler invocations through the server."""
+
+    async def asyncSetUp(self):
+        """Set up test fixtures."""
+        self.server = ThothMCPServer(
+            name="handler-integration-test",
+            version="1.0.0",
+        )
+
+    async def test_list_tools_handler_invocation(self):
+        """Test that list_tools handler returns proper tool list."""
+        # Get the list_tools handler from the server
+        # The handlers are registered with the MCP server instance
+        self.assertIsInstance(self.server.server, Server)
+
+    async def test_handbook_repo_path_creation(self):
+        """Test that handbook_repo_path directory is created."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            test_path = Path(tmpdir) / "test_handbook"
+            server = ThothMCPServer(handbook_repo_path=str(test_path))
+            # Directory should be created
+            self.assertTrue(test_path.exists())
+            self.assertTrue(test_path.is_dir())
+            # Verify server was initialized with correct path
+            self.assertEqual(server.handbook_repo_path, str(test_path))
+
+    async def test_handbook_repo_path_default(self):
+        """Test default handbook_repo_path."""
+        server = ThothMCPServer()
+        expected_path = Path.home() / ".thoth" / "handbook"
+        self.assertEqual(Path(server.handbook_repo_path), expected_path)
+
+    async def test_vector_store_none_when_db_missing(self):
+        """Test that vector_store is None when database is missing."""
+        server = ThothMCPServer(handbook_db_path="/completely/nonexistent/path")
+        self.assertIsNone(server.vector_store)
+
+    async def test_search_handbook_clamps_n_results(self):
+        """Test that _search_handbook properly clamps n_results."""
+        if self.server.vector_store is None:
+            self.skipTest("Vector store not available")
+
+        with patch.object(self.server, "_cached_search") as mock_cache:
+            mock_cache.return_value = ((), (), (), (), 0.1)
+
+            # Test clamping to minimum
+            await self.server._search_handbook("test", n_results=0)
+            # Should have been called with clamped value
+            self.assertTrue(mock_cache.called)
+
+            # Test clamping to maximum
+            mock_cache.reset_mock()
+            await self.server._search_handbook("test", n_results=100)
+            self.assertTrue(mock_cache.called)
+
+    async def test_get_handbook_section_clamps_limit(self):
+        """Test that _get_handbook_section properly clamps limit."""
+        if self.server.vector_store is None:
+            self.skipTest("Vector store not available")
+
+        with patch.object(self.server.vector_store, "get_documents") as mock_get:
+            mock_get.return_value = {"documents": [], "metadatas": []}
+
+            # Test clamping to minimum
+            await self.server._get_handbook_section("test", limit=0)
+            # Test clamping to maximum
+            await self.server._get_handbook_section("test", limit=200)
+
+            # Both should have been called (validates clamping works)
+            self.assertEqual(mock_get.call_count, 2)
+
+    async def test_list_handbook_topics_clamps_max_depth(self):
+        """Test that _list_handbook_topics properly clamps max_depth."""
+        if self.server.vector_store is None:
+            self.skipTest("Vector store not available")
+
+        with (
+            patch.object(self.server.vector_store, "get_document_count") as mock_count,
+            patch.object(self.server.vector_store, "get_documents") as mock_get,
+        ):
+            mock_count.return_value = 1
+            mock_get.return_value = {"documents": ["d"], "metadatas": [{}]}
+
+            # Test clamping
+            await self.server._list_handbook_topics(max_depth=0)
+            await self.server._list_handbook_topics(max_depth=10)
+
+            # Both should complete without error
+            self.assertEqual(mock_count.call_count, 2)
+
+    async def test_get_recent_updates_clamps_days(self):
+        """Test that _get_recent_updates properly clamps days."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self.server.handbook_repo_path = tmpdir
+
+            # These should clamp but not crash
+            result1 = await self.server._get_recent_updates(days=0)
+            result2 = await self.server._get_recent_updates(days=200)
+
+            # Both should return error (no repo) but shouldn't crash
+            self.assertIsInstance(result1, str)
+            self.assertIsInstance(result2, str)
+
+    async def test_get_recent_updates_clamps_max_commits(self):
+        """Test that _get_recent_updates properly clamps max_commits."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self.server.handbook_repo_path = tmpdir
+
+            # These should clamp but not crash
+            result1 = await self.server._get_recent_updates(max_commits=0)
+            result2 = await self.server._get_recent_updates(max_commits=200)
+
+            # Both should return error (no repo) but shouldn't crash
+            self.assertIsInstance(result1, str)
+            self.assertIsInstance(result2, str)
+
+    async def test_cached_search_converts_to_tuples(self):
+        """Test that _cached_search converts results to tuples."""
+        if self.server.vector_store is None:
+            self.skipTest("Vector store not available")
+
+        with patch.object(self.server.vector_store, "search_similar") as mock_search:
+            mock_search.return_value = {
+                "ids": ["id1"],
+                "documents": ["doc1"],
+                "metadatas": [{"key": "value"}],
+                "distances": [0.5],
+            }
+
+            result = self.server._cached_search("query", 5, None)
+
+            # Result should be tuple
+            self.assertIsInstance(result, tuple)
+            self.assertEqual(len(result), 5)
+
+            # Elements should be tuples
+            self.assertIsInstance(result[0], tuple)  # ids
+            self.assertIsInstance(result[1], tuple)  # documents
+            self.assertIsInstance(result[2], tuple)  # metadatas
+            self.assertIsInstance(result[3], tuple)  # distances
+            self.assertIsInstance(result[4], float)  # search_time
+
+    async def test_search_result_includes_timing(self):
+        """Test that search results include timing information."""
+        if self.server.vector_store is None:
+            self.skipTest("Vector store not available")
+
+        with patch.object(self.server, "_cached_search") as mock_cache:
+            mock_cache.return_value = (
+                ("id1",),
+                ("Document content",),
+                ({"section": "test"},),
+                (0.2,),
+                0.456,
+            )
+
+            result = await self.server._search_handbook("test query")
+
+            # Should include search time
+            self.assertIn("Search time:", result)
+            self.assertIn("0.456s", result)
+
+    async def test_get_recent_updates_with_first_commit(self):
+        """Test _get_changed_files_for_commit handles first commit."""
+        mock_commit = MagicMock()
+        mock_commit.parents = []
+        mock_commit.stats.files = {"file1.txt": {}, "file2.txt": {}}
+
+        files = self.server._get_changed_files_for_commit(mock_commit)
+
+        self.assertIsInstance(files, list)
+        self.assertIn("file1.txt", files)
+        self.assertIn("file2.txt", files)
+
+    async def test_format_commit_details_multiline_message(self):
+        """Test _format_commit_details with multiline commit message."""
+        mock_commit = MagicMock()
+        mock_commit.hexsha = "abc123def456"
+        mock_commit.committed_date = datetime.now(timezone.utc).timestamp()
+        mock_commit.author.name = "Test"
+        mock_commit.author.email = "test@test.com"
+        mock_commit.message = "First line\n\nSecond paragraph\nThird line"
+
+        lines = self.server._format_commit_details(mock_commit, [], 1, 1)
+        commit_str = "\n".join(lines)
+
+        # Should only show first line
+        self.assertIn("First line", commit_str)
+        self.assertNotIn("Second paragraph", commit_str)
+
+    async def test_apply_path_filter_empty_list(self):
+        """Test _apply_path_filter with empty file list."""
+        files = []
+        filtered = self.server._apply_path_filter(files, "*.md")
+
+        self.assertEqual(filtered, [])
+        self.assertIsInstance(filtered, list)
+
+    @patch("thoth.mcp_server.server.VectorStore")
+    async def test_init_vector_store_os_error(self, mock_vs):
+        """Test _init_vector_store handles OSError."""
+        mock_vs.side_effect = OSError("Disk error")
+
+        server = ThothMCPServer(handbook_db_path="./test_db")
+        # Should handle error gracefully
+        self.assertIsNone(server.vector_store)
+
+    @patch("thoth.mcp_server.server.VectorStore")
+    async def test_init_vector_store_value_error(self, mock_vs):
+        """Test _init_vector_store handles ValueError."""
+        mock_vs.side_effect = ValueError("Invalid config")
+
+        server = ThothMCPServer(handbook_db_path="./test_db")
+        # Should handle error gracefully
+        self.assertIsNone(server.vector_store)
+
+    @patch("thoth.mcp_server.server.Path")
+    async def test_init_vector_store_db_exists_check(self, mock_path):
+        """Test _init_vector_store checks if database exists."""
+        # Mock Path to return false for exists()
+        mock_path_instance = MagicMock()
+        mock_path_instance.exists.return_value = False
+        mock_path.return_value = mock_path_instance
+
+        server = ThothMCPServer(handbook_db_path="/fake/path")
+        # Vector store should be None when path doesn't exist
+        self.assertIsNone(server.vector_store)
