@@ -847,9 +847,7 @@ class ThothMCPServer:
         try:
             return Repo(str(repo_path))
         except InvalidGitRepositoryError:
-            return (
-                f"Error: Invalid git repository at {repo_path}. The directory exists but is not a valid git repository."
-            )
+            return f"Error: Invalid git repository at {repo_path}. The directory exists but not a valid git repository."
 
     def _get_changed_files_for_commit(self, commit: Any) -> list[str]:
         """Extract changed files from a commit."""
