@@ -237,11 +237,70 @@ class ThothMCPServer:
                     )
                 )
 
+                tools.append(
+                    Tool(
+                        name="get_handbook_section",
+                        description=(
+                            "Retrieve all content from a specific handbook section. "
+                            "Returns complete section content with metadata including sources "
+                            "and chunk information."
+                        ),
+                        inputSchema={
+                            "type": "object",
+                            "properties": {
+                                "section_name": {
+                                    "type": "string",
+                                    "description": (
+                                        "The name of the section to retrieve "
+                                        "(e.g., 'introduction', 'guidelines', 'procedures')"
+                                    ),
+                                },
+                                "limit": {
+                                    "type": "integer",
+                                    "description": (
+                                        "Maximum number of chunks to return from the section (default: 50, max: 100)"
+                                    ),
+                                    "default": 50,
+                                    "minimum": 1,
+                                    "maximum": 100,
+                                },
+                            },
+                            "required": ["section_name"],
+                        },
+                    )
+                )
+
+                tools.append(
+                    Tool(
+                        name="list_handbook_topics",
+                        description=(
+                            "List all available handbook topics and sections. "
+                            "Returns a structured view of the handbook organization with "
+                            "section names and document counts."
+                        ),
+                        inputSchema={
+                            "type": "object",
+                            "properties": {
+                                "max_depth": {
+                                    "type": "integer",
+                                    "description": "Maximum depth for nested sections (default: 2, max: 5)",
+                                    "default": 2,
+                                    "minimum": 1,
+                                    "maximum": 5,
+                                },
+                            },
+                            "required": [],
+                        },
+                    )
+                )
+
             return tools
 
         # Register call_tool handler - executes tools by name
         @self.server.call_tool()
-        async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
+        async def call_tool(  # noqa: PLR0911
+            name: str, arguments: dict[str, Any]
+        ) -> list[TextContent]:
             """Execute a tool by name with given arguments.
 
             Dispatches tool execution based on the tool name. Each tool
@@ -290,6 +349,41 @@ class ThothMCPServer:
                     query=arguments["query"],
                     n_results=arguments.get("n_results", 5),
                     filter_section=arguments.get("filter_section"),
+                )
+                return [TextContent(type="text", text=result)]
+
+            # Handle get_handbook_section tool - retrieve full section content
+            if name == "get_handbook_section":
+                # Check if vector store is available
+                if self.vector_store is None:
+                    return [
+                        TextContent(
+                            type="text",
+                            text="Error: Handbook database not available. Please ensure the handbook was ingested.",
+                        )
+                    ]
+
+                # Retrieve complete section
+                result = await self._get_handbook_section(
+                    section_name=arguments["section_name"],
+                    limit=arguments.get("limit", 50),
+                )
+                return [TextContent(type="text", text=result)]
+
+            # Handle list_handbook_topics tool - show handbook structure
+            if name == "list_handbook_topics":
+                # Check if vector store is available
+                if self.vector_store is None:
+                    return [
+                        TextContent(
+                            type="text",
+                            text="Error: Handbook database not available. Please ensure the handbook was ingested.",
+                        )
+                    ]
+
+                # List available topics
+                result = await self._list_handbook_topics(
+                    max_depth=arguments.get("max_depth", 2),
                 )
                 return [TextContent(type="text", text=result)]
 
@@ -522,6 +616,168 @@ class ThothMCPServer:
             # Returns error message to user instead of raising exception
             logger.exception("Search error")
             return f"Error performing search: {e!s}"
+
+    async def _get_handbook_section(self, section_name: str, limit: int = 50) -> str:
+        """Retrieve all content from a specific handbook section.
+
+        Fetches all documents that belong to the specified section from the
+        vector store. This is useful for retrieving complete section content
+        rather than semantic search results.
+
+        Args:
+            section_name: Name of the section to retrieve
+                         Example: 'introduction', 'guidelines', 'procedures'
+            limit: Maximum number of chunks to return (default: 50, max: 100)
+                  Clamped to range [1, 100]
+
+        Returns:
+            Formatted string containing:
+                - Section header with name
+                - Total number of chunks found
+                - Each chunk with metadata (source, chunk index)
+                OR error message if section not found or retrieval fails
+
+        Example:
+            >>> result = await server._get_handbook_section(
+            ...     section_name="introduction",
+            ...     limit=10
+            ... )
+            >>> print(result)
+            Handbook Section: 'introduction'
+            Total chunks: 10
+            ...
+        """
+        try:
+            # Validate and clamp limit to acceptable range
+            limit = max(1, min(limit, 100))
+
+            # Guard against None vector_store
+            if self.vector_store is None:
+                msg = "Vector store is not initialized"
+                raise RuntimeError(msg)
+
+            # Retrieve documents filtered by section name
+            results = self.vector_store.get_documents(where={"section": section_name}, limit=limit)
+
+            # Check if any documents were found
+            if not results["documents"]:
+                return f"No content found for section: '{section_name}'"
+
+            # Format results
+            result_lines = [
+                f"Handbook Section: '{section_name}'",
+                f"Total chunks: {len(results['documents'])}",
+                "",
+            ]
+
+            # Add each document with metadata
+            for i, (doc, metadata) in enumerate(zip(results["documents"], results["metadatas"], strict=True), 1):
+                result_lines.append(f"--- Chunk {i} ---")
+
+                # Add metadata if available
+                if metadata:
+                    if "source" in metadata:
+                        result_lines.append(f"Source: {metadata['source']}")
+                    if "chunk_index" in metadata:
+                        result_lines.append(f"Chunk Index: {metadata['chunk_index']}")
+
+                result_lines.append(f"\nContent:\n{doc}\n")
+
+            logger.info(
+                "Retrieved %d chunks from section '%s'",
+                len(results["documents"]),
+                section_name,
+            )
+
+            return "\n".join(result_lines)
+
+        except (ValueError, RuntimeError, KeyError) as e:
+            logger.exception("Error retrieving section")
+            return f"Error retrieving section '{section_name}': {e!s}"
+
+    async def _list_handbook_topics(self, max_depth: int = 2) -> str:
+        """List all available handbook topics and sections.
+
+        Retrieves unique section names from the vector store metadata and
+        organizes them into a structured view of the handbook organization.
+
+        Args:
+            max_depth: Maximum depth for nested sections (default: 2, max: 5)
+                      Currently used for future hierarchical organization
+                      Clamped to range [1, 5]
+
+        Returns:
+            Formatted string containing:
+                - Total number of documents in handbook
+                - List of sections with document counts
+                - Organizational structure
+                OR error message if retrieval fails
+
+        Example:
+            >>> result = await server._list_handbook_topics(max_depth=2)
+            >>> print(result)
+            Handbook Topics and Sections
+            Total documents: 150
+
+            Available Sections:
+            - introduction (10 chunks)
+            - guidelines (25 chunks)
+            ...
+        """
+        try:
+            # Validate and clamp max_depth
+            max_depth = max(1, min(max_depth, 5))
+
+            # Guard against None vector_store
+            if self.vector_store is None:
+                msg = "Vector store is not initialized"
+                raise RuntimeError(msg)
+
+            # Get total document count
+            total_docs = self.vector_store.get_document_count()
+
+            if total_docs == 0:
+                return "Handbook is empty. No topics available."
+
+            # Get all documents to extract unique sections
+            # We retrieve all documents but only extract metadata
+            all_docs = self.vector_store.get_documents(limit=total_docs)
+
+            # Count documents per section
+            section_counts: dict[str, int] = {}
+            for metadata in all_docs["metadatas"]:
+                if metadata and "section" in metadata:
+                    section = metadata["section"]
+                    section_counts[section] = section_counts.get(section, 0) + 1
+
+            # Format results
+            result_lines = [
+                "Handbook Topics and Sections",
+                f"Total documents: {total_docs}",
+                "",
+                "Available Sections:",
+            ]
+
+            # Sort sections alphabetically for consistent output
+            for section in sorted(section_counts.keys()):
+                count = section_counts[section]
+                result_lines.append(f"  - {section} ({count} chunks)")
+
+            # Add summary
+            result_lines.extend(
+                [
+                    "",
+                    f"Total sections: {len(section_counts)}",
+                ]
+            )
+
+            logger.info("Listed %d sections from handbook", len(section_counts))
+
+            return "\n".join(result_lines)
+
+        except (ValueError, RuntimeError, KeyError) as e:
+            logger.exception("Error listing topics")
+            return f"Error listing handbook topics: {e!s}"
 
     async def run(self) -> None:
         """Run the MCP server with stdio transport."""
