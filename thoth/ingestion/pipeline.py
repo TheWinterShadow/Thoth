@@ -364,6 +364,9 @@ class IngestionPipeline:
                     if file_str not in self.state.processed_files:
                         self.state.processed_files.append(file_str)
                     successful += 1
+                    # Update statistics to account for deleted chunks when no new chunks are added
+                    self.state.total_chunks -= deleted_count
+                    self.state.total_documents -= deleted_count
                     continue
 
                 # Step 3: Add new documents
