@@ -184,6 +184,37 @@ class VectorStore:
         delete_desc = f"ids={ids}" if ids else f"where={where}"
         logger.info(f"Deleted documents matching {delete_desc}")
 
+    def delete_by_file_path(self, file_path: str) -> int:
+        """Delete all documents associated with a specific file path.
+
+        Args:
+            file_path: The file path to match in metadata
+
+        Returns:
+            Number of documents deleted
+
+        Raises:
+            Exception: If deletion fails
+        """
+        try:
+            # First, get count of documents to delete
+            existing = self.collection.get(where={"file_path": file_path})
+            count = len(existing["ids"])
+
+            if count == 0:
+                logger.info(f"No documents found for file path: {file_path}")
+                return 0
+
+            # Delete all documents with matching file_path
+            self.collection.delete(where={"file_path": file_path})
+
+            logger.info(f"Deleted {count} documents for file path: {file_path}")
+            return count
+
+        except Exception:
+            logger.exception(f"Failed to delete documents for file path: {file_path}")
+            raise
+
     def get_document_count(self) -> int:
         """Get the total number of documents in the collection.
 
