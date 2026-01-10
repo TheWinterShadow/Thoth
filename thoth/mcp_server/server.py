@@ -948,7 +948,7 @@ class ThothMCPServer:
                 repo.iter_commits(
                     "HEAD",
                     max_count=max_commits,
-                    since=since_date.isoformat(),
+                    since=since_date,
                 )
             )
 
