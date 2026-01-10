@@ -307,13 +307,17 @@ class TestIngestionPipeline:
 
         # Set up previous state
         pipeline.state.last_commit = "old_commit"
-        pipeline.repo_manager.get_changed_files.return_value = ["file1.md"]
+        pipeline.repo_manager.get_file_changes.return_value = {
+            "added": ["file1.md"],
+            "modified": [],
+            "deleted": [],
+        }
         pipeline.repo_manager.clone_path = tmp_path
 
         # Run pipeline
         stats = pipeline.run(incremental=True)
 
-        assert pipeline.repo_manager.get_changed_files.called
+        assert pipeline.repo_manager.get_file_changes.called
         assert isinstance(stats, PipelineStats)
 
     def test_reset_keep_repo(self, pipeline):
