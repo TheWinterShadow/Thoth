@@ -335,4 +335,11 @@ class HandbookRepoManager:
                 # Fallback: treat as modified
                 modified_files.append(file_path)
         elif status.startswith("C"):  # Copied
-            added_files.append(file_path)
+            # Copied files have format: C<score>\tsourcepath\tnewpath
+            # Treat as add new, keep source intact
+            if "\t" in file_path:
+                _source_path, new_path = file_path.split("\t", 1)
+                added_files.append(new_path)
+            else:
+                # Fallback: treat as modified to avoid malformed added paths
+                modified_files.append(file_path)
