@@ -628,7 +628,7 @@ class IngestionPipeline:
             duration = (end_time - start_time).total_seconds()
 
             total_files_processed = (
-                len(deleted_files) + len(files_to_process)
+                len(added_files_list) + len(modified_files_list) + len(deleted_files)
                 if incremental and self.state.last_commit
                 else len(files_to_process)
             )
