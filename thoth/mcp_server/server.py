@@ -855,7 +855,7 @@ class ThothMCPServer:
             # Get diff with parent commit
             parent = commit.parents[0]
             diffs = parent.diff(commit)
-            return [diff.a_path or diff.b_path for diff in diffs]
+            return [diff.b_path or diff.a_path for diff in diffs]
         # First commit - list all files
         return list(commit.stats.files.keys())
 
