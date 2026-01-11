@@ -233,3 +233,113 @@ class HandbookRepoManager:
         except (GitCommandError, InvalidGitRepositoryError):
             self.logger.exception(MSG_DIFF_FAILED)
             return None
+
+    def get_file_changes(self, since_commit: str) -> dict[str, list[str]] | None:
+        """Get categorized file changes since a specific commit.
+
+        Args:
+            since_commit: Commit SHA to compare against
+
+        Returns:
+            Dictionary with keys 'added', 'modified', 'deleted' containing
+            lists of file paths, or None if error occurs
+
+        Raises:
+            RuntimeError: If repository doesn't exist
+        """
+        if not self.clone_path.exists():
+            msg = MSG_NO_REPO.format(path=self.clone_path)
+            raise RuntimeError(msg)
+
+        try:
+            repo = Repo(str(self.clone_path))
+
+            # Get diff with status information
+            diff_output = repo.git.diff("--name-status", since_commit, "HEAD")
+
+            if not diff_output:
+                self.logger.info("No files changed since commit %s", since_commit)
+                return {"added": [], "modified": [], "deleted": []}
+
+            # Parse the diff output
+            added_files: list[str] = []
+            modified_files: list[str] = []
+            deleted_files: list[str] = []
+
+            for line in diff_output.strip().split("\n"):
+                if not line:
+                    continue
+
+                parts = line.split("\t", 1)
+                if len(parts) != 2:
+                    continue
+
+                status = parts[0]
+                file_path = parts[1]
+
+                # Handle different status codes
+                if status.startswith("A"):
+                    added_files.append(file_path)
+                elif status.startswith("M"):
+                    modified_files.append(file_path)
+                elif status.startswith("D"):
+                    deleted_files.append(file_path)
+                elif status.startswith(("R", "C")):  # Renamed or Copied
+                    self._handle_rename_or_copy(status, file_path, deleted_files, added_files, modified_files)
+                else:
+                    # Unknown status, treat as modified
+                    modified_files.append(file_path)
+
+            self.logger.info(
+                "Found %d added, %d modified, %d deleted files since commit %s",
+                len(added_files),
+                len(modified_files),
+                len(deleted_files),
+                since_commit,
+            )
+
+            return {
+                "added": added_files,
+                "modified": modified_files,
+                "deleted": deleted_files,
+            }
+        except (GitCommandError, InvalidGitRepositoryError):
+            self.logger.exception(MSG_DIFF_FAILED)
+            return None
+
+    def _handle_rename_or_copy(
+        self,
+        status: str,
+        file_path: str,
+        deleted_files: list[str],
+        added_files: list[str],
+        modified_files: list[str],
+    ) -> None:
+        """Handle renamed or copied files.
+
+        Args:
+            status: Git status code (R or C)
+            file_path: File path(s) from git diff
+            deleted_files: List to append deleted file paths
+            added_files: List to append added file paths
+            modified_files: List to append modified file paths (fallback)
+        """
+        if status.startswith("R"):  # Renamed
+            # Renamed files have format: R<score>\toldpath\tnewpath
+            # Treat as delete old + add new
+            if "\t" in file_path:
+                old_path, new_path = file_path.split("\t", 1)
+                deleted_files.append(old_path)
+                added_files.append(new_path)
+            else:
+                # Fallback: treat as modified
+                modified_files.append(file_path)
+        elif status.startswith("C"):  # Copied
+            # Copied files have format: C<score>\tsourcepath\tnewpath
+            # Treat as add new, keep source intact
+            if "\t" in file_path:
+                _source_path, new_path = file_path.split("\t", 1)
+                added_files.append(new_path)
+            else:
+                # Fallback: treat as modified to avoid malformed added paths
+                modified_files.append(file_path)

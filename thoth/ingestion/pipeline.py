@@ -286,6 +286,140 @@ class IngestionPipeline:
         )
         return successful, failed
 
+    def _handle_deleted_files(self, deleted_files: list[str]) -> tuple[int, int]:
+        """Handle deleted files by removing their documents from vector store.
+
+        Args:
+            deleted_files: List of deleted file paths (relative to repo)
+
+        Returns:
+            Tuple of (successful_count, failed_count)
+        """
+        successful = 0
+        failed = 0
+
+        for file_path in deleted_files:
+            try:
+                # Delete all documents associated with this file
+                deleted_count = self.vector_store.delete_by_file_path(file_path)
+
+                # Remove from processed files list
+                if file_path in self.state.processed_files:
+                    self.state.processed_files.remove(file_path)
+
+                # Update statistics, ensuring counters do not go negative
+                self.state.total_chunks = max(0, self.state.total_chunks - deleted_count)
+                self.state.total_documents = max(0, self.state.total_documents - deleted_count)
+
+                self.logger.info(
+                    "Deleted %d documents for removed file: %s",
+                    deleted_count,
+                    file_path,
+                )
+                successful += 1
+
+            except Exception as e:
+                self.logger.exception("Failed to handle deleted file %s", file_path)
+                self.state.failed_files[file_path] = f"Delete failed: {e}"
+                failed += 1
+
+        return successful, failed
+
+    def _handle_modified_files(
+        self,
+        modified_files: list[Path],
+        progress_callback: Callable[[int, int, str], None] | None = None,
+    ) -> tuple[int, int]:
+        """Handle modified files by updating their documents in vector store.
+
+        Args:
+            modified_files: List of modified file paths
+            progress_callback: Optional callback for progress updates
+
+        Returns:
+            Tuple of (successful_count, failed_count)
+        """
+        successful = 0
+        failed = 0
+        total_chunks = 0
+
+        for i, file_path in enumerate(modified_files):
+            file_str = str(file_path.relative_to(self.repo_manager.clone_path))
+
+            try:
+                # Step 1: Delete old documents for this file
+                deleted_count = self.vector_store.delete_by_file_path(file_str)
+                self.logger.debug(
+                    "Deleted %d old documents for modified file: %s",
+                    deleted_count,
+                    file_str,
+                )
+
+                # Step 2: Process the updated file
+                chunks = self._process_file(file_path)
+
+                if not chunks:
+                    self.logger.warning("No chunks generated from modified file %s", file_str)
+                    # Still mark as successful since we deleted old content
+                    if file_str not in self.state.processed_files:
+                        self.state.processed_files.append(file_str)
+                    successful += 1
+                    # Update statistics to account for deleted chunks when no new chunks are added
+                    self.state.total_chunks -= deleted_count
+                    self.state.total_documents -= deleted_count
+                    continue
+
+                # Step 3: Add new documents
+                documents = [chunk.content for chunk in chunks]
+                metadatas = [chunk.metadata.to_dict() for chunk in chunks]
+                ids = [chunk.metadata.chunk_id for chunk in chunks]
+
+                embeddings = self.embedder.embed(documents, show_progress=False)
+                self.vector_store.add_documents(
+                    documents=documents,
+                    metadatas=metadatas,
+                    ids=ids,
+                    embeddings=embeddings,
+                )
+
+                # Update state
+                if file_str not in self.state.processed_files:
+                    self.state.processed_files.append(file_str)
+
+                # Update chunk counts (net change)
+                self.state.total_chunks += len(chunks) - deleted_count
+                self.state.total_documents += len(chunks) - deleted_count
+                total_chunks += len(chunks)
+
+                successful += 1
+
+                if progress_callback:
+                    progress_callback(
+                        i + 1,
+                        len(modified_files),
+                        f"Updated {file_str} ({len(chunks)} chunks)",
+                    )
+
+            except Exception as e:
+                self.logger.exception("Failed to handle modified file %s", file_str)
+                self.state.failed_files[file_str] = f"Modify failed: {e}"
+                failed += 1
+
+                if progress_callback:
+                    progress_callback(
+                        i + 1,
+                        len(modified_files),
+                        f"Failed to update {file_str}",
+                    )
+
+        self.logger.info(
+            "Modified files processed: %d successful, %d failed, %d new chunks",
+            successful,
+            failed,
+            total_chunks,
+        )
+        return successful, failed
+
     def run(  # noqa: PLR0912, PLR0915
         self,
         force_reclone: bool = False,
@@ -332,63 +466,153 @@ class IngestionPipeline:
 
             all_files = self._discover_markdown_files(self.repo_manager.clone_path)
 
+            # Initialize file lists
+            files_to_process: list[Path] = []
+            deleted_files: list[str] = []
+            added_files_list: list[Path] = []
+            modified_files_list: list[Path] = []
+
             # Filter files for incremental processing
             if incremental and self.state.last_commit:
-                changed_files = self.repo_manager.get_changed_files(self.state.last_commit)
-                if changed_files is not None:
-                    files_to_process = [
-                        f for f in all_files if str(f.relative_to(self.repo_manager.clone_path)) in changed_files
+                file_changes = self.repo_manager.get_file_changes(self.state.last_commit)
+                if file_changes is not None:
+                    # Filter for markdown files only
+                    added_md = [f for f in file_changes["added"] if f.endswith(".md")]
+                    modified_md = [f for f in file_changes["modified"] if f.endswith(".md")]
+                    deleted_md = [f for f in file_changes["deleted"] if f.endswith(".md")]
+
+                    # Convert to Path objects for added and modified
+                    added_files_list = [
+                        self.repo_manager.clone_path / f
+                        for f in added_md
+                        if (self.repo_manager.clone_path / f).exists()
                     ]
+                    modified_files_list = [
+                        self.repo_manager.clone_path / f
+                        for f in modified_md
+                        if (self.repo_manager.clone_path / f).exists()
+                    ]
+
+                    files_to_process = added_files_list + modified_files_list
+                    deleted_files = deleted_md
+
                     self.logger.info(
-                        "Incremental mode: processing %d changed files out of %d total",
-                        len(files_to_process),
-                        len(all_files),
+                        "Incremental mode: %d added, %d modified, %d deleted markdown files",
+                        len(added_files_list),
+                        len(modified_files_list),
+                        len(deleted_files),
                     )
                 else:
-                    self.logger.warning("Failed to get changed files, processing all files")
+                    self.logger.warning("Failed to get file changes, processing all files")
                     files_to_process = all_files
+                    added_files_list = all_files
+                    modified_files_list = []
             else:
                 files_to_process = all_files
+                added_files_list = all_files
+                modified_files_list = []
                 self.logger.info("Full mode: processing all %d files", len(all_files))
 
-            # Step 3: Process files in batches
+            # Step 3: Handle file changes incrementally
             if progress_callback:
-                progress_callback(20, 100, f"Processing {len(files_to_process)} files...")
+                progress_callback(20, 100, "Processing file changes...")
 
             total_successful = 0
             total_failed = 0
 
-            for batch_start in range(0, len(files_to_process), self.batch_size):
-                batch_end = min(batch_start + self.batch_size, len(files_to_process))
-                batch = files_to_process[batch_start:batch_end]
+            # Step 3a: Handle deleted files
+            if deleted_files:
+                self.logger.info("Processing %d deleted files", len(deleted_files))
+                if progress_callback:
+                    progress_callback(25, 100, f"Removing {len(deleted_files)} deleted files...")
 
-                self.logger.info(
-                    "Processing batch %d-%d of %d files",
-                    batch_start + 1,
-                    batch_end,
-                    len(files_to_process),
-                )
+                deleted_success, deleted_failed = self._handle_deleted_files(deleted_files)
+                total_successful += deleted_success
+                total_failed += deleted_failed
+                self._save_state()
 
-                def make_callback(start: int) -> Callable[[int, int, str], None] | None:
-                    if progress_callback is None:
-                        return None
+            # Step 3b: Handle modified files (update)
+            if incremental and self.state.last_commit and modified_files_list:
+                self.logger.info("Processing %d modified files", len(modified_files_list))
 
-                    return lambda c, _t, m: progress_callback(
-                        20 + int((start + c) / len(files_to_process) * 70),
-                        100,
-                        m,
+                for batch_start in range(0, len(modified_files_list), self.batch_size):
+                    batch_end = min(batch_start + self.batch_size, len(modified_files_list))
+                    batch = modified_files_list[batch_start:batch_end]
+
+                    self.logger.info(
+                        "Processing modified batch %d-%d of %d files",
+                        batch_start + 1,
+                        batch_end,
+                        len(modified_files_list),
                     )
 
-                successful, failed = self._process_batch(
-                    batch,
-                    progress_callback=make_callback(batch_start),
-                )
+                    def make_modified_callback(
+                        start: int,
+                    ) -> Callable[[int, int, str], None] | None:
+                        if progress_callback is None:
+                            return None
+                        total_changes = len(deleted_files) + len(modified_files_list) + len(added_files_list)
+                        base_progress = 25 + int(len(deleted_files) / max(total_changes, 1) * 30)
+                        return lambda c, _t, m: progress_callback(
+                            base_progress + int((start + c) / len(modified_files_list) * 25),
+                            100,
+                            m,
+                        )
 
-                total_successful += successful
-                total_failed += failed
+                    successful, failed = self._handle_modified_files(
+                        batch,
+                        progress_callback=make_modified_callback(batch_start),
+                    )
 
-                # Save state after each batch
-                self._save_state()
+                    total_successful += successful
+                    total_failed += failed
+                    self._save_state()
+
+            # Step 3c: Handle added files (new) - process normally
+            if added_files_list:
+                self.logger.info("Processing %d added/new files", len(added_files_list))
+
+                for batch_start in range(0, len(added_files_list), self.batch_size):
+                    batch_end = min(batch_start + self.batch_size, len(added_files_list))
+                    batch = added_files_list[batch_start:batch_end]
+
+                    self.logger.info(
+                        "Processing added batch %d-%d of %d files",
+                        batch_start + 1,
+                        batch_end,
+                        len(added_files_list),
+                    )
+
+                    def make_added_callback(
+                        start: int,
+                    ) -> Callable[[int, int, str], None] | None:
+                        if progress_callback is None:
+                            return None
+                        if incremental and self.state.last_commit:
+                            total_changes = len(deleted_files) + len(modified_files_list) + len(added_files_list)
+                            base_progress = 25 + int(
+                                (len(deleted_files) + len(modified_files_list)) / max(total_changes, 1) * 55
+                            )
+                            return lambda c, _t, m: progress_callback(
+                                base_progress + int((start + c) / len(added_files_list) * 20),
+                                100,
+                                m,
+                            )
+                        # Full mode
+                        return lambda c, _t, m: progress_callback(
+                            20 + int((start + c) / len(added_files_list) * 70),
+                            100,
+                            m,
+                        )
+
+                    successful, failed = self._process_batch(
+                        batch,
+                        progress_callback=make_added_callback(batch_start),
+                    )
+
+                    total_successful += successful
+                    total_failed += failed
+                    self._save_state()
 
             # Step 4: Finalize
             self.state.last_commit = current_commit
@@ -403,8 +627,14 @@ class IngestionPipeline:
             end_time = datetime.now(timezone.utc)
             duration = (end_time - start_time).total_seconds()
 
+            total_files_processed = (
+                len(added_files_list) + len(modified_files_list) + len(deleted_files)
+                if incremental and self.state.last_commit
+                else len(files_to_process)
+            )
+
             stats = PipelineStats(
-                total_files=len(files_to_process),
+                total_files=total_files_processed,
                 processed_files=total_successful,
                 failed_files=total_failed,
                 total_chunks=self.state.total_chunks,
