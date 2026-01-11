@@ -4,16 +4,12 @@ from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 import logging
 import time
-from typing import Any, TypeVar
+from typing import Any
 from urllib.parse import quote
 
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-
-# Type variable for decorators
-F = TypeVar("F", bound=Callable[..., Any])
-
 # Constants
 DEFAULT_BASE_URL = "https://gitlab.com/api/v4"
 DEFAULT_TIMEOUT = 30
