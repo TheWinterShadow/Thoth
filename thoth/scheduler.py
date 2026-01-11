@@ -17,6 +17,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from thoth.ingestion.pipeline import IngestionPipeline
 from thoth.utils.logger import setup_logger
 
+__all__ = ["SyncScheduler"]
 logger = logging.getLogger(__name__)
 
 
