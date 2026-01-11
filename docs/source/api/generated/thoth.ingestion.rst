@@ -1,4 +1,4 @@
-﻿thoth.ingestion
+thoth.ingestion
 ===============
 
 .. automodule:: thoth.ingestion

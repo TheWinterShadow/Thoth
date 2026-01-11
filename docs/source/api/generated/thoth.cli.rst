@@ -8,6 +8,7 @@ thoth.cli
 
    .. autosummary::
    
+      create_default_health_checks
       setup_logger
       setup_pipeline
    
@@ -15,16 +16,19 @@ thoth.cli
 
    .. autosummary::
    
+      Any
       BarColumn
       Console
       Embedder
       HandbookRepoManager
       IngestionPipeline
       MarkdownChunker
+      Monitor
       Panel
       Path
       Progress
       SpinnerColumn
+      SyncScheduler
       Table
       TaskProgressColumn
       TextColumn

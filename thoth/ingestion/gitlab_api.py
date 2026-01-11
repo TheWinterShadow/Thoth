@@ -1,6 +1,5 @@
 """GitLab API client with rate limiting, caching, and error handling."""
 
-from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 import logging
 import time
@@ -10,6 +9,7 @@ from urllib.parse import quote
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
 # Constants
 DEFAULT_BASE_URL = "https://gitlab.com/api/v4"
 DEFAULT_TIMEOUT = 30
