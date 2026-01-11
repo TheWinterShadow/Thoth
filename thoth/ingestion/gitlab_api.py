@@ -344,7 +344,8 @@ class GitLabAPIClient:
         Returns:
             Project data
         """
-        endpoint = f"projects/{project_id}"
+        encoded_project_id = quote(project_id, safe="") if "/" in project_id and "%" not in project_id else project_id
+        endpoint = f"projects/{encoded_project_id}"
         return self.get(endpoint, use_cache=use_cache)  # type: ignore[no-any-return]
 
     def list_projects(
