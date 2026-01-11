@@ -6,6 +6,10 @@ checking status, and managing the vector store.
 
 import logging
 from pathlib import Path
+import signal
+import sys
+import time
+from typing import Any
 
 import click
 from rich.console import Console
@@ -25,9 +29,81 @@ from thoth.ingestion.embedder import Embedder
 from thoth.ingestion.pipeline import IngestionPipeline
 from thoth.ingestion.repo_manager import HandbookRepoManager
 from thoth.ingestion.vector_store import VectorStore
+from thoth.monitoring import Monitor, create_default_health_checks
+from thoth.scheduler import SyncScheduler
 from thoth.utils.logger import setup_logger
 
 console = Console()
+
+
+def _setup_monitor_and_scheduler(
+    pipeline: IngestionPipeline,
+    db_path: str | None,
+) -> tuple[Monitor, SyncScheduler]:
+    """Set up monitoring and scheduler with callbacks.
+
+    Args:
+        pipeline: Configured pipeline instance
+        db_path: Database path
+
+    Returns:
+        Tuple of (monitor, scheduler)
+    """
+    # Set up monitoring
+    repo_manager = pipeline.repo_manager
+    vector_store_path = Path(db_path or "./handbook_vectors")
+    repo_path = repo_manager.clone_path
+
+    monitor = Monitor()
+
+    # Register default health checks
+    default_checks = create_default_health_checks(
+        vector_store_path=vector_store_path,
+        repo_path=repo_path,
+    )
+    for name, check_func in default_checks.items():
+        monitor.register_health_check(name, check_func)
+
+    # Set up scheduler
+    scheduler = SyncScheduler(pipeline=pipeline)
+
+    # Add monitoring callbacks
+    def on_success(stats: dict[str, Any]) -> None:
+        monitor.record_sync_success(
+            files_processed=stats["processed_files"],
+            chunks_created=stats["total_chunks"],
+            duration=stats["duration_seconds"],
+        )
+        console.print(f"[green]✓ Sync completed: {stats['processed_files']} files processed[/green]")
+
+    def on_failure(error: Exception) -> None:
+        monitor.record_sync_failure(error)
+        console.print(f"[red]✗ Sync failed: {error}[/red]")
+
+    scheduler.add_success_callback(on_success)
+    scheduler.add_failure_callback(on_failure)
+
+    return monitor, scheduler
+
+
+def _display_final_stats(monitor: Monitor) -> None:
+    """Display final scheduler statistics.
+
+    Args:
+        monitor: Monitor instance with collected metrics
+    """
+    metrics = monitor.get_metrics()
+    console.print("\n[bold]Final Statistics:[/bold]")
+    metrics_table = Table(show_header=False, box=None, padding=(0, 2))
+    metrics_table.add_column("Key", style="dim")
+    metrics_table.add_column("Value")
+
+    metrics_table.add_row("Total Syncs", str(metrics["sync_count"]))
+    metrics_table.add_row("Successful", str(metrics["sync_success_count"]))
+    metrics_table.add_row("Failed", str(metrics["sync_failure_count"]))
+    metrics_table.add_row("Success Rate", f"{monitor.get_success_rate():.1f}%")
+
+    console.print(metrics_table)
 
 
 def setup_pipeline(
@@ -425,6 +501,313 @@ def search(
                     border_style="blue",
                 )
             )
+
+    except RuntimeError as e:
+        console.print(f"\n[bold red]✗ Error:[/bold red] {e}")
+        raise click.Abort from e
+
+
+@cli.command()
+@click.option(
+    "--repo-url",
+    default=None,
+    help="Repository URL (default: GitLab handbook)",
+)
+@click.option(
+    "--clone-path",
+    default=None,
+    help="Local path to clone repository (default: ~/.thoth/handbook)",
+)
+@click.option(
+    "--db-path",
+    default=None,
+    help="Database path (default: ./handbook_vectors)",
+)
+@click.option(
+    "--collection",
+    default=None,
+    help="Collection name (default: thoth_documents)",
+)
+@click.option(
+    "--interval",
+    default=60,
+    type=int,
+    help="Sync interval in minutes (default: 60)",
+)
+@click.option(
+    "--cron-hour",
+    type=int,
+    help="Hour to run (0-23) for cron-style scheduling",
+)
+@click.option(
+    "--cron-minute",
+    default=0,
+    type=int,
+    help="Minute to run (0-59) for cron-style scheduling",
+)
+@click.option(
+    "--start-immediately",
+    is_flag=True,
+    help="Run sync immediately on start",
+)
+def schedule(
+    repo_url: str | None,
+    clone_path: str | None,
+    db_path: str | None,
+    collection: str | None,
+    interval: int,
+    cron_hour: int | None,
+    cron_minute: int,
+    start_immediately: bool,
+) -> None:
+    """Start the scheduler for automated syncs.
+
+    By default, syncs run every 60 minutes. Use --interval to change frequency,
+    or use --cron-hour and --cron-minute for cron-style scheduling.
+
+    Examples:
+        # Run every 30 minutes
+        thoth schedule --interval 30
+
+        # Run daily at 2:30 AM
+        thoth schedule --cron-hour 2 --cron-minute 30
+
+        # Run every hour, starting immediately
+        thoth schedule --start-immediately
+
+    Press Ctrl+C to stop the scheduler.
+    """
+    console.print(Panel.fit("⏰ Thoth Scheduler", style="bold magenta"))
+
+    try:
+        # Set up pipeline
+        pipeline = setup_pipeline(repo_url, clone_path, db_path, collection)
+
+        # Set up monitoring and scheduler
+        monitor, scheduler = _setup_monitor_and_scheduler(pipeline, db_path)
+
+        # Configure schedule
+        if cron_hour is not None:
+            scheduler.add_cron_job(hour=cron_hour, minute=cron_minute)
+            console.print(f"[cyan]Scheduled daily at {cron_hour:02d}:{cron_minute:02d}[/cyan]")
+        else:
+            scheduler.add_interval_job(
+                interval_minutes=interval,
+                start_immediately=start_immediately,
+            )
+            console.print(f"[cyan]Scheduled every {interval} minutes[/cyan]")
+
+        # Start scheduler
+        scheduler.start()
+        console.print("[green]Scheduler started[/green]")
+
+        # Display status
+        status = scheduler.get_job_status()
+        if status["next_run_time"]:
+            console.print(f"Next run: {status['next_run_time']}")
+
+        console.print("\n[dim]Press Ctrl+C to stop...[/dim]\n")
+
+        # Set up signal handler for graceful shutdown
+        def signal_handler(_sig: int, _frame: Any) -> None:
+            console.print("\n[yellow]Stopping scheduler...[/yellow]")
+            scheduler.stop()
+            console.print("[green]Scheduler stopped[/green]")
+            _display_final_stats(monitor)
+            sys.exit(0)
+
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+
+        # Keep running
+        while True:
+            time.sleep(1)
+
+    except RuntimeError as e:
+        console.print(f"\n[bold red]✗ Error:[/bold red] {e}")
+        raise click.Abort from e
+
+
+@cli.command()
+@click.option(
+    "--clone-path",
+    default=None,
+    help="Local path to repository (default: ~/.thoth/handbook)",
+)
+@click.option(
+    "--db-path",
+    default=None,
+    help="Database path (default: ./handbook_vectors)",
+)
+def health(
+    clone_path: str | None,
+    db_path: str | None,
+) -> None:
+    """Check system health status.
+
+    Runs health checks on key components and displays the results.
+    """
+    console.print(Panel.fit("🏥 Health Check", style="bold cyan"))
+
+    try:
+        # Set up paths
+        vector_store_path = Path(db_path or "./handbook_vectors")
+        repo_manager = HandbookRepoManager(
+            repo_url="https://gitlab.com/gitlab-com/content-sites/handbook.git",
+            clone_path=Path(clone_path) if clone_path else None,
+        )
+        repo_path = repo_manager.clone_path
+
+        # Set up monitor
+        monitor = Monitor()
+
+        # Register default health checks
+        default_checks = create_default_health_checks(
+            vector_store_path=vector_store_path,
+            repo_path=repo_path,
+        )
+        for name, check_func in default_checks.items():
+            monitor.register_health_check(name, check_func)
+
+        # Run health checks
+        report = monitor.get_health_report()
+
+        # Display overall status
+        overall = report["overall_status"]
+        status_colors = {
+            "healthy": "green",
+            "degraded": "yellow",
+            "unhealthy": "red",
+            "unknown": "dim",
+        }
+        status_symbols = {
+            "healthy": "✓",
+            "degraded": "⚠",
+            "unhealthy": "✗",
+            "unknown": "?",
+        }
+
+        color = status_colors.get(overall, "white")
+        symbol = status_symbols.get(overall, "?")
+
+        console.print(f"\n[bold {color}]{symbol} Overall Status: {overall.upper()}[/bold {color}]\n")
+
+        # Display individual checks
+        checks_table = Table(show_header=True, header_style="bold")
+        checks_table.add_column("Component", style="bold")
+        checks_table.add_column("Status", justify="center")
+        checks_table.add_column("Message")
+
+        for name, check_data in report["checks"].items():
+            status = check_data["status"]
+            color = status_colors.get(status, "white")
+            symbol = status_symbols.get(status, "?")
+
+            checks_table.add_row(
+                name.replace("_", " ").title(),
+                f"[{color}]{symbol} {status}[/{color}]",
+                check_data["message"],
+            )
+
+        console.print(checks_table)
+
+        # Exit with appropriate code
+        if overall == "unhealthy":
+            sys.exit(1)
+        elif overall == "degraded":
+            sys.exit(2)
+        else:
+            sys.exit(0)
+
+    except Exception as e:
+        console.print(f"\n[bold red]✗ Error:[/bold red] {e}")
+        raise click.Abort from e
+
+
+@cli.command()
+@click.option(
+    "--repo-url",
+    default=None,
+    help="Repository URL (default: GitLab handbook)",
+)
+@click.option(
+    "--clone-path",
+    default=None,
+    help="Local path to repository (default: ~/.thoth/handbook)",
+)
+@click.option(
+    "--db-path",
+    default=None,
+    help="Database path (default: ./handbook_vectors)",
+)
+@click.option(
+    "--collection",
+    default=None,
+    help="Collection name (default: thoth_documents)",
+)
+def sync(
+    repo_url: str | None,
+    clone_path: str | None,
+    db_path: str | None,
+    collection: str | None,
+) -> None:
+    """Manually trigger a sync operation.
+
+    This is useful for testing the scheduler or running a one-off sync.
+    """
+    console.print(Panel.fit("🔄 Manual Sync", style="bold blue"))
+
+    try:
+        # Set up pipeline
+        pipeline = setup_pipeline(repo_url, clone_path, db_path, collection)
+
+        # Set up monitoring
+        monitor = Monitor()
+        monitor.record_sync_start()
+
+        # Run sync
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[bold blue]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            TimeRemainingColumn(),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Syncing...", total=100)
+
+            def progress_callback(current: int, total: int, message: str) -> None:
+                progress.update(task, completed=current, total=total, description=message)
+
+            try:
+                stats = pipeline.run(
+                    force_reclone=False,
+                    incremental=True,
+                    progress_callback=progress_callback,
+                )
+
+                monitor.record_sync_success(
+                    files_processed=stats.processed_files,
+                    chunks_created=stats.total_chunks,
+                    duration=stats.duration_seconds,
+                )
+
+                console.print("\n[bold green]✓ Sync completed successfully![/bold green]\n")
+
+                # Display stats
+                stats_table = Table(show_header=False, box=None, padding=(0, 2))
+                stats_table.add_column("Metric", style="dim")
+                stats_table.add_column("Value")
+
+                stats_table.add_row("Files Processed", f"{stats.processed_files:,}")
+                stats_table.add_row("Total Chunks", f"{stats.total_chunks:,}")
+                stats_table.add_row("Duration", f"{stats.duration_seconds:.2f}s")
+
+                console.print(stats_table)
+
+            except Exception as e:
+                monitor.record_sync_failure(e)
+                raise
 
     except RuntimeError as e:
         console.print(f"\n[bold red]✗ Error:[/bold red] {e}")

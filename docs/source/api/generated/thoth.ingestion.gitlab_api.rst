@@ -16,11 +16,9 @@ thoth.ingestion.gitlab\_api
    
       Any
       CacheEntry
-      Callable
       GitLabAPIClient
       HTTPAdapter
       Retry
-      TypeVar
       datetime
       timedelta
       timezone

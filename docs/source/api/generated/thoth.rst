@@ -13,4 +13,6 @@
    cli
    ingestion
    mcp_server
+   monitoring
+   scheduler
    utils
