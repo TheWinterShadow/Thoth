@@ -20,12 +20,14 @@ from thoth.utils.logger import setup_logger
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "HealthStatus",
     "HealthCheck",
+    "HealthStatus",
     "Metrics",
     "Monitor",
     "create_default_health_checks",
 ]
+
+
 class HealthStatus(Enum):
     """Enumeration of possible health statuses."""
 

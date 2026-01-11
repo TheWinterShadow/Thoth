@@ -70,9 +70,8 @@ class SyncScheduler:
                 "Invalid interval_minutes value: %s. The interval must be greater than 0.",
                 interval_minutes,
             )
-            raise ValueError(
-                f"interval_minutes must be greater than 0, got {interval_minutes}"
-            )
+            msg = f"interval_minutes must be greater than 0, got {interval_minutes}"
+            raise ValueError(msg)
         trigger = IntervalTrigger(minutes=interval_minutes)
 
         self.scheduler.add_job(
