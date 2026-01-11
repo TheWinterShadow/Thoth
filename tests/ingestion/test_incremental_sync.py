@@ -275,9 +275,11 @@ class TestIncrementalSync:
         assert count == 0
         mock_collection.delete.assert_not_called()
 
-    def test_renamed_files_handled_correctly(self):
+    def test_renamed_files_handled_correctly(self, tmp_path):
         """Test that renamed files are handled as delete + add."""
         manager = HandbookRepoManager()
+        manager.clone_path = tmp_path / "handbook"
+        manager.clone_path.mkdir(parents=True)
 
         with patch("thoth.ingestion.repo_manager.Repo") as mock_repo:
             mock_git = Mock()
