@@ -1,4 +1,4 @@
-thoth.ingestion
+﻿thoth.ingestion
 ===============
 
 .. automodule:: thoth.ingestion
@@ -10,9 +10,17 @@ thoth.ingestion
    
       Chunk
       ChunkMetadata
+      GitLabAPIClient
       HandbookRepoManager
       MarkdownChunker
       VectorStore
+   
+   .. rubric:: Exceptions
+
+   .. autosummary::
+   
+      GitLabAPIError
+      RateLimitError
    
 .. rubric:: Modules
 
@@ -22,6 +30,7 @@ thoth.ingestion
 
    chunker
    embedder
+   gitlab_api
    pipeline
    repo_manager
    vector_store
