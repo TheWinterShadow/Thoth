@@ -65,6 +65,14 @@ class SyncScheduler:
             interval_minutes: Minutes between sync runs (default: 60)
             start_immediately: Whether to run the job immediately on schedule (default: False)
         """
+        if interval_minutes <= 0:
+            self.logger.error(
+                "Invalid interval_minutes value: %s. The interval must be greater than 0.",
+                interval_minutes,
+            )
+            raise ValueError(
+                f"interval_minutes must be greater than 0, got {interval_minutes}"
+            )
         trigger = IntervalTrigger(minutes=interval_minutes)
 
         self.scheduler.add_job(
