@@ -21,6 +21,7 @@ dependencies = [
 "torch>=2.0.0,<2.6.0",
 "click>=8.1.0",
 "rich>=13.0.0",
+"requests>=2.31.0",
 ]
 authors = [
   { name = "TheWinterShadow", email = "elijah.j.winter@outlook.com" },
@@ -63,7 +64,8 @@ dev = [
   "pre-commit>=3.0.0",
   "sphinx>=5.0.0",
   "furo>=2023.0.0",
-  "mcp"
+  "mcp",
+  "types-requests>=2.31.0",
 ]
 
 # Documentation dependencies
@@ -119,6 +121,8 @@ exclude = [
 # ==============================================================================
 [tool.hatch.envs.default]
 dependencies = [
+  "mypy>=1.0.0",
+  "types-requests>=2.31.0",
 ]
 
 [tool.hatch.envs.dev]
@@ -129,6 +133,7 @@ dependencies = [
   "furo",
   "myst-parser", 
   # Type stubs for better IDE support and mypy
+  "types-requests>=2.31.0",
 
   # Code formatting and linting
   "black",
@@ -149,6 +154,7 @@ dependencies = [
   "mypy",
   "bandit",
   "pre-commit",
+  "types-requests>=2.31.0",
 ]
 
 [tool.hatch.envs.lint.scripts]
