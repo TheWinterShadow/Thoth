@@ -23,9 +23,9 @@ The Docker image is optimized for production with:
 ```bash
 docker run -d \
   --name thoth-mcp-server \
-  -v $(pwd)/handbook_vectors:/app/data/handbook_vectors \
-  -v $(pwd)/chroma_db:/app/data/chroma_db \
-  -v $(pwd)/handbook_repo:/app/data/handbook_repo \
+  -v "${PWD}"/handbook_vectors:/app/data/handbook_vectors \
+  -v "${PWD}"/chroma_db:/app/data/chroma_db \
+  -v "${PWD}"/handbook_repo:/app/data/handbook_repo \
   -e HANDBOOK_DB_PATH=/app/data/handbook_vectors \
   thoth-mcp:latest
 ```
