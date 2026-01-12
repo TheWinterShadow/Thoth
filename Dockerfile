@@ -69,7 +69,7 @@ ENV PYTHONUNBUFFERED=1 \
 # EXPOSE 8000
 
 # Set the entrypoint to run the MCP server
-ENTRYPOINT ["python", "-m", "thoth.mcp_server.server"]
+ENTRYPOINT ["python", "-c", "from thoth.mcp_server import run_server; run_server()"]
 
 # Health check to verify the container is running
 # This checks if the Python process is alive
