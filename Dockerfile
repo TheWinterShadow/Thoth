@@ -65,6 +65,9 @@ ENV PYTHONUNBUFFERED=1 \
 # If you configure the server to use TCP transport instead, you may add:
 # EXPOSE 8000
 
+RUN useradd -m -u 1000 thoth && chown -R thoth:thoth /app/data
+USER thoth
+
 # Set the entrypoint to run the MCP server
 ENTRYPOINT ["python", "-c", "from thoth.mcp_server import run_server; run_server()"]
 
