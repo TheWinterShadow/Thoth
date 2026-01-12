@@ -54,9 +54,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
-# Copy application code
-COPY --from=builder /build/thoth /app/thoth
-
 # Create necessary directories for data persistence
 RUN mkdir -p /app/data/chroma_db /app/data/handbook_vectors /app/data/handbook_repo
 
