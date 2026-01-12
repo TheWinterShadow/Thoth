@@ -1,0 +1,56 @@
+# ==============================================================================
+# Docker Compose Configuration for Thoth MCP Server
+# ==============================================================================
+
+services:
+  thoth-mcp:
+    image: thoth-mcp:latest
+    container_name: thoth-mcp-server
+
+    # Build configuration (uncomment to build from source)
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+
+    # Environment variables
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+
+    # Volume mounts for persistent data
+    volumes:
+      - ./chroma_db:/app/data/chroma_db
+      - ./handbook_vectors:/app/data/handbook_vectors
+      - ./handbook_repo:/app/data/handbook_repo
+
+    # Port mapping (if needed for TCP-based MCP)
+    # ports:
+    #   - "8000:8000"
+
+    # Restart policy
+    restart: unless-stopped
+
+    # Resource limits (optional, adjust based on your needs)
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '2.0'
+    #       memory: 4G
+    #     reservations:
+    #       cpus: '1.0'
+    #       memory: 2G
+
+    # Health check
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'python' >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
