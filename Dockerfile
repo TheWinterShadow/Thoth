@@ -36,11 +36,9 @@ RUN pip install --no-cache-dir .
 # Copy the entire application
 COPY . .
 
-# Install the application in development mode to ensure all files are accessible
-RUN pip install --no-cache-dir -e .
-
 # ------------------------------------------------------------------------------
 # Stage 2: Runtime - Create minimal runtime image
+# ------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------
 FROM python:3.11-slim
 
