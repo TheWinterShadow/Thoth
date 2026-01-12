@@ -1,0 +1,70 @@
+# Python cache and compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Data directories (should be mounted as volumes)
+chroma_db/
+handbook_vectors/
+handbook_repo/
+:memory:/
+
+# Testing
+tests/
+testing.ipynb
+benchmark_embeddings.py
+
+# Infrastructure
+infra/
+
+# Misc
+*.log
+.DS_Store
+.env
+.env.local
+terraform.tfstate
+terraform.tfstate.backup
+LICENSE
+CONTRIBUTING.md
