@@ -27,7 +27,7 @@ COPY thoth/__about__.py ./thoth/__about__.py
 # Install torch BEFORE other dependencies to avoid pulling GPU version
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir \
-        torch==2.5.1 \
+        "torch>=2.0.0,<2.6.0" \
         --index-url https://download.pytorch.org/whl/cpu
 
 # Now install the application (this will skip torch since it's already installed)
