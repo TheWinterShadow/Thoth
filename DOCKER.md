@@ -62,7 +62,7 @@ Mount these to your host filesystem to persist data across container restarts.
 
 ## Image Size
 
-The optimized image size is approximately **2.5-3 GB**, compared to ~6 GB with GPU dependencies.
+The optimized image size is approximately **1.6-1.7 GB**, reduced from ~6.2 GB when using GPU (CUDA) dependencies.
 
 Optimization techniques used:
 1. **Multi-stage build** - Build dependencies are discarded in the final image
