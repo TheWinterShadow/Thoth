@@ -65,9 +65,9 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     HANDBOOK_DB_PATH=/app/data/handbook_vectors
 
-# Expose the port for MCP server (if using TCP transport)
-# Note: MCP typically uses stdio by default
-EXPOSE 8000
+# MCP uses stdio transport by default, so no ports are exposed here.
+# If you configure the server to use TCP transport instead, you may add:
+# EXPOSE 8000
 
 # Set the entrypoint to run the MCP server
 ENTRYPOINT ["python", "-m", "thoth.mcp_server.server"]
