@@ -16,7 +16,6 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - PYTHONDONTWRITEBYTECODE=1
-      - HANDBOOK_DB_PATH=/app/data/handbook_vectors
 
     # Volume mounts for persistent data
     volumes:
