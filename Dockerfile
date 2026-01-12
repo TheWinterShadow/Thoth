@@ -62,8 +62,7 @@ RUN mkdir -p /app/data/chroma_db /app/data/handbook_vectors /app/data/handbook_r
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    HANDBOOK_DB_PATH=/app/data/handbook_vectors
+    PYTHONDONTWRITEBYTECODE=1
 
 # MCP uses stdio transport by default, so no ports are exposed here.
 # If you configure the server to use TCP transport instead, you may add:
