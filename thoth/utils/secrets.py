@@ -75,7 +75,7 @@ class SecretManagerClient:
             return payload
 
         except Exception as e:  # noqa: BLE001
-            logger.warning("Failed to retrieve secret %s: %s", secret_id, e)
+            logger.warning("Failed to retrieve secret from Secret Manager: %s", e)
             # Fallback to environment variable
             env_var = secret_id.upper().replace("-", "_")
             return os.getenv(env_var)
