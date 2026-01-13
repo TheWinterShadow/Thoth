@@ -1,8 +1,9 @@
 # Cloud Run service for Thoth MCP Server
 resource "google_cloud_run_v2_service" "thoth_mcp" {
-  name     = "thoth-mcp-server"
-  location = var.region
-  ingress  = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+  name                = "thoth-mcp-server"
+  location            = var.region
+  ingress             = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+  deletion_protection = false
 
   template {
     containers {
