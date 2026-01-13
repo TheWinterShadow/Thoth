@@ -62,11 +62,14 @@ jobs:
           if ! gsutil ls -b gs://thoth-terraform-state &>/dev/null; then
             echo "State bucket doesn't exist. Running Terraform bootstrap..."
             
+            # Clean any existing terraform state/cache
+            rm -rf .terraform terraform.tfstate* .terraform.lock.hcl
+            
             # Initialize Terraform without backend (local state for bootstrap)
             terraform init -backend=false
             
-            # Apply bootstrap configuration only (with -backend=false to skip backend requirements)
-            TF_CLI_ARGS_apply="-backend=false" terraform apply -auto-approve -input=false \
+            # Apply bootstrap configuration only
+            terraform apply -auto-approve -input=false \
               -target=google_storage_bucket.terraform_state \
               -target=google_storage_bucket_iam_member.github_actions_state_access \
               -var="project_id=${{ env.GCP_PROJECT_ID }}" \

@@ -60,6 +60,10 @@ echo ""
 # Navigate to infra directory
 cd "$(dirname "$0")/../infra"
 
+# Clean any existing terraform state/cache
+echo "🧹 Cleaning existing Terraform state/cache..."
+rm -rf .terraform terraform.tfstate* .terraform.lock.hcl
+
 # Initialize Terraform without backend (for bootstrap)
 echo "1️⃣  Initializing Terraform (local state)..."
 terraform init -backend=false
@@ -67,7 +71,7 @@ terraform init -backend=false
 # Apply bootstrap configuration
 echo ""
 echo "2️⃣  Creating state bucket with Terraform..."
-TF_CLI_ARGS_apply="-backend=false" terraform apply -auto-approve \
+terraform apply -auto-approve \
     -target=google_storage_bucket.terraform_state \
     -target=google_storage_bucket_iam_member.github_actions_state_access \
     -var="project_id=$PROJECT_ID" \
