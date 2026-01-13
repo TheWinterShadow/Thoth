@@ -56,9 +56,35 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
+      - name: Bootstrap Terraform State Bucket
+        run: |
+          # Check if state bucket exists
+          if ! gsutil ls -b gs://thoth-terraform-state &>/dev/null; then
+            echo "State bucket doesn't exist. Running Terraform bootstrap..."
+            
+            # Initialize Terraform without backend (local state for bootstrap)
+            terraform init -backend=false
+            
+            # Apply bootstrap configuration only
+            terraform apply -auto-approve -input=false \
+              -target=google_storage_bucket.terraform_state \
+              -target=google_storage_bucket_iam_member.github_actions_state_access \
+              -var="project_id=${{ env.GCP_PROJECT_ID }}" \
+              -var="region=${{ env.GCP_REGION }}"
+            
+            # Move local state to the newly created bucket
+            echo "Moving local state to GCS backend..."
+            terraform init -force-copy -backend-config="bucket=thoth-terraform-state"
+            
+            echo "Bootstrap complete. State bucket created and configured."
+          else
+            echo "State bucket already exists. Skipping bootstrap."
+          fi
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
       - name: Terraform Init
         id: init
-        run: terraform init
+        run: terraform init -reconfigure
         working-directory: ${{ env.TF_WORKING_DIR }}
 
       - name: Terraform Format Check
@@ -72,15 +98,38 @@ jobs:
         run: terraform validate
         working-directory: ${{ env.TF_WORKING_DIR }}
 
+      - name: Import Existing Resources
+        run: |
+          # Import existing bucket if it exists and isn't in state
+          if gsutil ls -b gs://thoth-storage-bucket &>/dev/null; then
+            if ! terraform state show google_storage_bucket.thoth_bucket &>/dev/null; then
+              echo "Importing existing bucket into Terraform state..."
+              terraform import -var="project_id=${{ env.GCP_PROJECT_ID }}" \
+                -var="region=${{ env.GCP_REGION }}" \
+                google_storage_bucket.thoth_bucket thoth-storage-bucket || echo "Import failed or resource already managed"
+            else
+              echo "Bucket already in Terraform state"
+            fi
+          else
+            echo "Bucket doesn't exist yet, will be created"
+          fi
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        continue-on-error: true
+
       - name: Terraform Plan
         id: plan
         run: |
-          terraform plan -no-color -input=false -out=tfplan
+          terraform plan -no-color -input=false -out=tfplan \
+            -var="project_id=${{ env.GCP_PROJECT_ID }}" \
+            -var="region=${{ env.GCP_REGION }}"
           echo "## Terraform Plan" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`terraform" >> $GITHUB_STEP_SUMMARY
           terraform show -no-color tfplan >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
         working-directory: ${{ env.TF_WORKING_DIR }}
+        env:
+          TF_VAR_gitlab_token: "" # Will be set in Secret Manager post-deployment
+          TF_VAR_gitlab_url: "" # Will be set in Secret Manager post-deployment
 
       - name: Terraform Apply
         id: apply
@@ -94,6 +143,18 @@ jobs:
         run: |
           BUCKET_NAME=$(terraform output -raw storage_bucket_name || echo "thoth-storage-bucket")
           echo "bucket_name=$BUCKET_NAME" >> $GITHUB_OUTPUT
+
+          # Display secret setup instructions
+          echo "## 📝 Post-Deployment Steps" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Update Secrets in Secret Manager" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "# Update GitLab token" >> $GITHUB_STEP_SUMMARY
+          echo "echo -n 'YOUR_GITLAB_TOKEN' | gcloud secrets versions add gitlab-token --data-file=- --project=${{ env.GCP_PROJECT_ID }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# Test scheduler jobs" >> $GITHUB_STEP_SUMMARY
+          echo "gcloud scheduler jobs run thoth-daily-sync --location=${{ env.GCP_REGION }} --project=${{ env.GCP_PROJECT_ID }}" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
         working-directory: ${{ env.TF_WORKING_DIR }}
 
   deploy_cloud_run:
@@ -185,4 +246,22 @@ jobs:
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=${{ env.SERVICE_NAME }}" \
             --limit 20 --format "value(textPayload)" >> $GITHUB_STEP_SUMMARY || echo "No logs available yet"
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Verify Secrets and Scheduler
+        run: |
+          echo "### Infrastructure Components" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Check secrets
+          echo "#### Secrets (Secret Manager)" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          gcloud secrets list --project=${{ env.GCP_PROJECT_ID }} --filter="name~gitlab OR name~google-application" --format="table(name,createTime)" >> $GITHUB_STEP_SUMMARY || echo "No secrets found"
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Check scheduler jobs
+          echo "#### Scheduler Jobs" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          gcloud scheduler jobs list --location=${{ env.GCP_REGION }} --project=${{ env.GCP_PROJECT_ID }} --format="table(name,schedule,state)" >> $GITHUB_STEP_SUMMARY || echo "No scheduler jobs found"
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY

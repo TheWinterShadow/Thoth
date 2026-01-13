@@ -35,3 +35,24 @@ variable "bucket_location" {
   type        = string
   default     = "US"
 }
+
+# Secret variables (optional, can be set later via gcloud)
+variable "gitlab_token" {
+  description = "GitLab personal access token (optional, update via gcloud)"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "gitlab_url" {
+  description = "GitLab base URL (optional, defaults to gitlab.com)"
+  type        = string
+  default     = ""
+}
+
+variable "google_credentials_json" {
+  description = "Google service account credentials JSON (optional)"
+  type        = string
+  default     = ""
+  sensitive   = true
+}

@@ -5,12 +5,25 @@ terraform {
       version = "6.8.0"
     }
   }
+
+  # Backend configuration for state storage
+  # State bucket will be created by workflow if it doesn't exist
+  backend "gcs" {
+    bucket = "thoth-terraform-state"
+    prefix = "terraform/state"
+  }
 }
 
 provider "google" {
   project = var.project_id
   region  = var.region
   zone    = var.zone
+}
+
+# Reference to Terraform state bucket (created by bootstrap or workflow)
+# This is a data source, not a resource, to avoid circular dependency
+data "google_storage_bucket" "terraform_state" {
+  name = "thoth-terraform-state"
 }
 
 # Enable required APIs

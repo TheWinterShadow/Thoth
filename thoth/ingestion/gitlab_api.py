@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 import logging
+import os
 import time
 from typing import Any
 from urllib.parse import quote
@@ -66,13 +67,52 @@ class GitLabAPIClient:
         """Initialize GitLab API client.
 
         Args:
-            token: GitLab personal access token
-            base_url: Base URL for GitLab API
+            token: GitLab personal access token. If not provided, will try to get from
+                   Secret Manager or GITLAB_TOKEN environment variable.
+            base_url: Base URL for GitLab API. If not provided, will try to get from
+                      Secret Manager or GITLAB_BASE_URL environment variable.
             timeout: Request timeout in seconds
             max_retries: Maximum number of retries for failed requests
             backoff_factor: Backoff factor for exponential backoff
             logger: Logger instance
         """
+        # Try to get token and base_url from Secret Manager or environment
+        if token is None:
+            try:
+                from thoth.utils.secrets import get_secret_manager  # noqa: PLC0415
+
+                secret_manager = get_secret_manager()
+                token = secret_manager.get_gitlab_token()
+                if token:
+                    logger = logger or logging.getLogger(__name__)
+                    logger.debug("Retrieved GitLab token from Secret Manager")
+            except Exception as e:  # noqa: BLE001
+                logger = logger or logging.getLogger(__name__)
+                logger.debug("Could not retrieve token from Secret Manager: %s", e)
+
+            # Fallback to environment variable
+            if not token:
+                token = os.getenv("GITLAB_TOKEN")
+
+        if base_url == DEFAULT_BASE_URL:
+            try:
+                from thoth.utils.secrets import get_secret_manager  # noqa: PLC0415
+
+                secret_manager = get_secret_manager()
+                custom_url = secret_manager.get_gitlab_url()
+                if custom_url and custom_url != "https://gitlab.com":
+                    base_url = custom_url
+                    logger = logger or logging.getLogger(__name__)
+                    logger.debug("Using GitLab URL from Secret Manager: %s", base_url)
+            except Exception as e:  # noqa: BLE001
+                logger = logger or logging.getLogger(__name__)
+                logger.debug("Could not retrieve URL from Secret Manager: %s", e)
+
+            # Fallback to environment variable
+            env_url = os.getenv("GITLAB_BASE_URL")
+            if env_url:
+                base_url = env_url
+
         self.token = token
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
@@ -346,7 +386,7 @@ class GitLabAPIClient:
         """
         encoded_project_id = quote(project_id, safe="") if "/" in project_id and "%" not in project_id else project_id
         endpoint = f"projects/{encoded_project_id}"
-        return self.get(endpoint, use_cache=use_cache)  # type: ignore[no-any-return]
+        return self.get(endpoint, use_cache=use_cache)
 
     def list_projects(
         self,
@@ -362,7 +402,7 @@ class GitLabAPIClient:
         Returns:
             List of projects
         """
-        return self.get("projects", params=params, use_cache=use_cache)  # type: ignore[no-any-return]
+        return self.get("projects", params=params, use_cache=use_cache)
 
     # =========================================================================
     # Repository API Methods
@@ -394,7 +434,7 @@ class GitLabAPIClient:
             "ref": ref,
             "recursive": str(recursive).lower(),
         }
-        return self.get(endpoint, params=params, use_cache=use_cache)  # type: ignore[no-any-return]
+        return self.get(endpoint, params=params, use_cache=use_cache)
 
     def get_file(
         self,
@@ -416,7 +456,7 @@ class GitLabAPIClient:
         """
         endpoint = f"projects/{project_id}/repository/files/{quote(file_path, safe='')}"
         params = {"ref": ref}
-        return self.get(endpoint, params=params, use_cache=use_cache)  # type: ignore[no-any-return]
+        return self.get(endpoint, params=params, use_cache=use_cache)
 
     def get_commits(
         self,
@@ -448,7 +488,7 @@ class GitLabAPIClient:
             params["until"] = until
         if path:
             params["path"] = path
-        return self.get(endpoint, params=params, use_cache=use_cache)  # type: ignore[no-any-return]
+        return self.get(endpoint, params=params, use_cache=use_cache)
 
     def get_commit(
         self,
@@ -467,7 +507,7 @@ class GitLabAPIClient:
             Commit data
         """
         endpoint = f"projects/{project_id}/repository/commits/{commit_sha}"
-        return self.get(endpoint, use_cache=use_cache)  # type: ignore[no-any-return]
+        return self.get(endpoint, use_cache=use_cache)
 
     def get_commit_diff(
         self,
@@ -486,7 +526,7 @@ class GitLabAPIClient:
             List of diffs
         """
         endpoint = f"projects/{project_id}/repository/commits/{commit_sha}/diff"
-        return self.get(endpoint, use_cache=use_cache)  # type: ignore[no-any-return]
+        return self.get(endpoint, use_cache=use_cache)
 
     # =========================================================================
     # Branch API Methods
@@ -507,7 +547,7 @@ class GitLabAPIClient:
             List of branches
         """
         endpoint = f"projects/{project_id}/repository/branches"
-        return self.get(endpoint, use_cache=use_cache)  # type: ignore[no-any-return]
+        return self.get(endpoint, use_cache=use_cache)
 
     def get_branch(
         self,
@@ -526,7 +566,7 @@ class GitLabAPIClient:
             Branch data
         """
         endpoint = f"projects/{project_id}/repository/branches/{quote(branch, safe='')}"
-        return self.get(endpoint, use_cache=use_cache)  # type: ignore[no-any-return]
+        return self.get(endpoint, use_cache=use_cache)
 
     # =========================================================================
     # Merge Request API Methods
@@ -554,7 +594,7 @@ class GitLabAPIClient:
         request_params = {"state": state}
         if params:
             request_params.update(params)
-        return self.get(endpoint, params=request_params, use_cache=use_cache)  # type: ignore[no-any-return]
+        return self.get(endpoint, params=request_params, use_cache=use_cache)
 
     def get_merge_request(
         self,
@@ -573,7 +613,7 @@ class GitLabAPIClient:
             Merge request data
         """
         endpoint = f"projects/{project_id}/merge_requests/{mr_iid}"
-        return self.get(endpoint, use_cache=use_cache)  # type: ignore[no-any-return]
+        return self.get(endpoint, use_cache=use_cache)
 
     # =========================================================================
     # User API Methods
@@ -593,7 +633,7 @@ class GitLabAPIClient:
         """
         if not self.token:
             raise GitLabAPIError(MSG_AUTH_REQUIRED)
-        return self.get("user", use_cache=use_cache)  # type: ignore[no-any-return]
+        return self.get("user", use_cache=use_cache)
 
     def get_user(self, user_id: int, use_cache: bool = True) -> dict[str, Any]:
         """Get user details.
@@ -606,7 +646,7 @@ class GitLabAPIClient:
             User data
         """
         endpoint = f"users/{user_id}"
-        return self.get(endpoint, use_cache=use_cache)  # type: ignore[no-any-return]
+        return self.get(endpoint, use_cache=use_cache)
 
     # =========================================================================
     # Rate Limit Info

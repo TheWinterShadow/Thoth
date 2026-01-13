@@ -24,6 +24,7 @@ dependencies = [
 "requests>=2.31.0",
 "apscheduler>=3.10.0",
 "google-cloud-storage>=2.10.0",
+"google-cloud-secret-manager>=2.16.0",
 ]
 authors = [
   { name = "TheWinterShadow", email = "elijah.j.winter@outlook.com" },
@@ -451,6 +452,13 @@ show_error_codes = true
 warn_unused_ignores = true
 # Disable caching to avoid cache corruption issues
 cache_dir = "/dev/null"
+
+# Disable no-any-return for gitlab_api.py - the .json() method returns Any
+# and we can't control that. The type annotations accurately reflect what
+# GitLab API returns based on their documentation.
+[[tool.mypy.overrides]]
+module = "thoth.ingestion.gitlab_api"
+warn_return_any = false
 
 # Security scanning configuration
 [tool.bandit]

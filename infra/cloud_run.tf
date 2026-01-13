@@ -34,6 +34,27 @@ resource "google_cloud_run_v2_service" "thoth_mcp" {
         value = "INFO"
       }
 
+      # Secrets from Secret Manager
+      env {
+        name = "GITLAB_TOKEN"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.gitlab_token.secret_id
+            version = "latest"
+          }
+        }
+      }
+
+      env {
+        name = "GITLAB_BASE_URL"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.gitlab_url.secret_id
+            version = "latest"
+          }
+        }
+      }
+
       # Resource limits
       resources {
         limits = {

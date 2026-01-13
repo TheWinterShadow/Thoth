@@ -23,6 +23,14 @@ resource "google_storage_bucket" "thoth_bucket" {
     "project"    = "thoth"
     "managed-by" = "terraform"
   }
+
+  lifecycle {
+    prevent_destroy = false
+    ignore_changes = [
+      # Ignore changes to prevent recreation if bucket already exists
+      name,
+    ]
+  }
 }
 
 output "bucket_name" {
