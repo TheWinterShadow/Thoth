@@ -213,15 +213,18 @@ jobs:
         run: |
           # Check if Cloud Run service exists and needs deletion protection disabled
           if gcloud run services describe ${{ env.SERVICE_NAME }} --region=${{ env.GCP_REGION }} &>/dev/null; then
-            echo "Cloud Run service exists, checking if it needs to be updated..."
-            # If service exists, ensure deletion_protection is false before any destructive changes
-            # This is a targeted operation to update just the deletion protection setting
+            echo "Cloud Run service exists, disabling deletion protection..."
+            
+            # Use gcloud to directly update deletion_protection setting
+            gcloud run services update ${{ env.SERVICE_NAME }} \
+              --region=${{ env.GCP_REGION }} \
+              --no-deletion-protection \
+              --quiet || echo "Deletion protection update attempted"
+            
+            # If resource is tainted, untaint it to allow in-place update
             if terraform state show google_cloud_run_v2_service.thoth_mcp &>/dev/null; then
-              echo "Applying deletion_protection update if needed..."
-              terraform apply -auto-approve -input=false \
-                -target=google_cloud_run_v2_service.thoth_mcp \
-                -var="project_id=${{ env.GCP_PROJECT_ID }}" \
-                -var="region=${{ env.GCP_REGION }}" || echo "Update attempt completed"
+              echo "Untainting Cloud Run service if needed..."
+              terraform untaint google_cloud_run_v2_service.thoth_mcp || echo "No taint found"
             fi
           else
             echo "Cloud Run service doesn't exist yet, no action needed"
