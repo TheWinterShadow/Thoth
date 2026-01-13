@@ -46,7 +46,7 @@ resource "google_cloud_scheduler_job" "daily_sync" {
   http_target {
     http_method = "POST"
     uri         = "${google_cloud_run_v2_service.thoth_mcp.uri}/sync"
-    
+
     headers = {
       "Content-Type" = "application/json"
     }
@@ -90,15 +90,15 @@ resource "google_cloud_scheduler_job" "hourly_incremental_sync" {
   http_target {
     http_method = "POST"
     uri         = "${google_cloud_run_v2_service.thoth_mcp.uri}/sync"
-    
+
     headers = {
       "Content-Type" = "application/json"
     }
 
     body = base64encode(jsonencode({
-      "scheduled"    = true
-      "sync_type"    = "incremental"
-      "incremental"  = true
+      "scheduled"   = true
+      "sync_type"   = "incremental"
+      "incremental" = true
     }))
 
     oidc_token {

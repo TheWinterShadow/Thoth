@@ -62,32 +62,17 @@ jobs:
           if ! gsutil ls -b gs://thoth-terraform-state &>/dev/null; then
             echo "State bucket doesn't exist. Running Terraform bootstrap..."
             
-            # Clean any existing terraform state/cache
-            rm -rf .terraform terraform.tfstate* .terraform.lock.hcl
+            # Run bootstrap from separate directory to avoid validation issues
+            cd bootstrap
             
-            # Temporarily override backend configuration for bootstrap
-            cat > backend_override.tf <<'EOF'
-          terraform {
-            backend "local" {}
-          }
-          EOF
-            
-            # Initialize Terraform with local backend
+            # Initialize and apply bootstrap
             terraform init
-            
-            # Apply bootstrap configuration only
             terraform apply -auto-approve -input=false \
-              -target=google_storage_bucket.terraform_state \
-              -target=google_storage_bucket_iam_member.github_actions_state_access \
               -var="project_id=${{ env.GCP_PROJECT_ID }}" \
               -var="region=${{ env.GCP_REGION }}"
             
-            # Remove backend override and migrate to GCS
-            rm backend_override.tf
-            echo "Moving local state to GCS backend..."
-            terraform init -force-copy -reconfigure
-            
-            echo "Bootstrap complete. State bucket created and configured."
+            cd ..
+            echo "Bootstrap complete. State bucket created."
           else
             echo "State bucket already exists. Skipping bootstrap."
           fi

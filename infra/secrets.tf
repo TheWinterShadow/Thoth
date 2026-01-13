@@ -112,7 +112,7 @@ output "google_credentials_secret_name" {
 
 output "secret_manager_instructions" {
   description = "Instructions for updating secrets"
-  value = <<-EOT
+  value       = <<-EOT
     To update secrets, use the following commands:
     
     # Update GitLab token

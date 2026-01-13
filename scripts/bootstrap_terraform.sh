@@ -57,31 +57,17 @@ fi
 echo "📦 Creating state bucket: gs://$STATE_BUCKET"
 echo ""
 
-# Navigate to infra directory
-cd "$(dirname "$0")/../infra"
+# Navigate to bootstrap directory
+cd "$(dirname "$0")/../infra/bootstrap"
 
-# Clean any existing terraform state/cache
-echo "🧹 Cleaning existing Terraform state/cache..."
-rm -rf .terraform terraform.tfstate* .terraform.lock.hcl
-
-# Temporarily override backend configuration for bootstrap
-echo "1️⃣  Creating temporary backend override..."
-cat > backend_override.tf <<'EOF'
-terraform {
-  backend "local" {}
-}
-EOF
-
-# Initialize Terraform with local backend
-echo "2️⃣  Initializing Terraform (local state)..."
+# Initialize Terraform
+echo "1️⃣  Initializing Terraform..."
 terraform init
 
 # Apply bootstrap configuration
 echo ""
-echo "3️⃣  Creating state bucket with Terraform..."
+echo "2️⃣  Creating state bucket with Terraform..."
 terraform apply -auto-approve \
-    -target=google_storage_bucket.terraform_state \
-    -target=google_storage_bucket_iam_member.github_actions_state_access \
     -var="project_id=$PROJECT_ID" \
     -var="region=$REGION"
 
@@ -93,24 +79,14 @@ if ! gsutil ls -b "gs://$STATE_BUCKET" &>/dev/null; then
 fi
 
 echo ""
-echo "3️⃣  Migrating state to GCS backend..."
-# Migrate state to the new bucket
-rm backend_override.tf
-terraform init -migrate-state -force-copy -reconfigure
-
-# Clean up local state files
-echo ""
-echo "4️⃣  Cleaning up local state files..."
-rm -f terraform.tfstate terraform.tfstate.backup
-
-echo ""
 echo "✅ Bootstrap complete!"
 echo ""
 echo "State bucket created: gs://$STATE_BUCKET"
-echo "Terraform backend configured: GCS"
+echo "Bootstrap state stored locally in: infra/bootstrap/"
 echo ""
 echo "Next steps:"
 echo "  1. Run: cd infra && terraform init"
+echo "  2. Run: cd infra && terraform plan"
 echo "  2. Run: terraform plan"
 echo "  3. Run: terraform apply"
 echo ""
