@@ -12,7 +12,10 @@ Thoth is a modern Python library providing advanced utilities and tools for deve
 
 - **Repository Management**: Clone and track GitLab handbook repository with automated updates
 - **Vector Database**: ChromaDB integration for storing and querying document embeddings with semantic search
+- **Cloud Storage**: Google Cloud Storage integration for vector DB persistence and backup
 - **Embedding Generation**: Efficient batch embedding generation using sentence-transformers models
+- **Cloud Deployment**: Ready-to-deploy to Google Cloud Run with automated deployment scripts
+- **MCP Server**: Model Context Protocol server for AI assistant integration
 - **Modular Design**: Clean, composable utility functions
 - **Type Safety**: Full type annotations with mypy support
 - **High Performance**: Optimized implementations for common tasks
@@ -82,6 +85,14 @@ vector_store = VectorStore(
     collection_name="handbook_docs"
 )
 
+# Initialize with Google Cloud Storage backup (optional)
+vector_store_with_gcs = VectorStore(
+    persist_directory="./chroma_db",
+    collection_name="handbook_docs",
+    gcs_bucket_name="thoth-storage-bucket",
+    gcs_project_id="thoth-483015"
+)
+
 # Add documents - embeddings are automatically generated
 documents = [
     "Python is a high-level programming language.",
@@ -96,6 +107,13 @@ results = vector_store.search_similar(
     n_results=2
 )
 print(results["documents"])
+
+# Backup to Google Cloud Storage
+backup_name = vector_store_with_gcs.backup_to_gcs()
+print(f"Backup created: {backup_name}")
+
+# Restore from backup
+vector_store_with_gcs.restore_from_gcs(backup_name="backup_20260112_120000")
 
 # Add documents with metadata for filtering
 vector_store.add_documents(
@@ -158,10 +176,12 @@ Thoth follows a modular architecture designed for extensibility and maintainabil
 thoth/
 ├── __init__.py          # Main package entry point
 ├── __about__.py         # Version and metadata
+├── health.py            # Health check for Cloud Run deployments
 ├── ingestion/           # Data ingestion and processing
 │   ├── __init__.py
 │   ├── chunker.py       # Markdown document chunker
 │   ├── embedder.py      # Embedding generation with sentence-transformers
+│   ├── gcs_sync.py      # Google Cloud Storage sync for vector DB
 │   ├── repo_manager.py  # GitLab handbook repository manager
 │   └── vector_store.py  # ChromaDB vector database wrapper
 ├── mcp_server/          # MCP server implementation
@@ -184,6 +204,43 @@ Interested in contributing? See the [Development Guide](https://thewintershadow.
 - Release workflow
 
 Also check out our [Contributing Guide](CONTRIBUTING.md) for guidelines on submitting pull requests.
+
+## ☁️ Cloud Deployment
+
+Thoth can be deployed to Google Cloud Run for scalable, serverless operation:
+
+```bash
+# Quick deployment
+./scripts/deploy_cloud_run.sh
+
+# Verify deployment
+./scripts/verify_deployment.sh
+```
+
+For detailed deployment instructions, see:
+- [Cloud Run Deployment Guide](docs/CLOUD_RUN_DEPLOYMENT.md)
+- [Environment Configuration](docs/ENVIRONMENT_CONFIG.md)
+- [GitHub Actions CI/CD Setup](docs/GITHUB_ACTIONS.md)
+
+Key features:
+- Automated deployment with Terraform or gcloud CLI
+- GitHub Actions workflows for CI/CD
+- Google Cloud Storage integration for vector DB persistence
+- Auto-scaling from 0 to 10 instances
+- Built-in health checks and monitoring
+- Secure service account with minimal permissions
+
+### CI/CD with GitHub Actions
+
+The repository includes automated workflows for continuous integration and deployment:
+
+- **Infrastructure & Cloud Run Deploy**: Automatically provisions GCP infrastructure and deploys to Cloud Run on push to main
+- **Continuous Delivery**: Publishes to PyPI and deploys infrastructure on releases
+- **CI**: Runs tests and quality checks on all pull requests
+- **Documentation**: Builds and deploys Sphinx documentation
+- **Security**: CodeQL static analysis for vulnerability detection
+
+See [GitHub Actions Setup Guide](docs/GITHUB_ACTIONS.md) for detailed configuration and usage.
 
 ## 📖 Documentation
 

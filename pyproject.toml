@@ -23,6 +23,7 @@ dependencies = [
 "rich>=13.0.0",
 "requests>=2.31.0",
 "apscheduler>=3.10.0",
+"google-cloud-storage>=2.10.0",
 ]
 authors = [
   { name = "TheWinterShadow", email = "elijah.j.winter@outlook.com" },
