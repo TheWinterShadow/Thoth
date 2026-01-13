@@ -55,7 +55,7 @@ class SecretManagerClient:
             env_var = secret_id.upper().replace("-", "_")
             value = os.getenv(env_var)
             if value:
-                logger.debug("Using environment variable fallback for secret %s", secret_id)
+                logger.debug("Using environment variable fallback for secret")
             return value
 
         if not self.project_id:
