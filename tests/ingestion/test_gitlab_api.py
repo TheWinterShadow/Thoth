@@ -1,6 +1,7 @@
 """Tests for GitLab API client."""
 
 from datetime import datetime, timedelta, timezone
+import os
 import time
 import unittest
 from unittest.mock import Mock, patch
@@ -40,6 +41,13 @@ class TestGitLabAPIClient(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures."""
+        # Mock environment variables to prevent CI environment from interfering
+        self.env_patcher = patch.dict("os.environ", {}, clear=False)
+        self.env_mock = self.env_patcher.start()
+        # Ensure GITLAB_TOKEN and GITLAB_BASE_URL are not set
+        os.environ.pop("GITLAB_TOKEN", None)
+        os.environ.pop("GITLAB_BASE_URL", None)
+
         self.client = GitLabAPIClient(
             token="test-token",
             base_url="https://gitlab.com/api/v4",
@@ -47,6 +55,10 @@ class TestGitLabAPIClient(unittest.TestCase):
             max_retries=3,
         )
         self.mock_response = self._create_mock_response()
+
+    def tearDown(self):
+        """Clean up test fixtures."""
+        self.env_patcher.stop()
 
     def _create_mock_response(self):
         """Create mock response."""

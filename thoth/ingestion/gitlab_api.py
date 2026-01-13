@@ -114,7 +114,11 @@ class GitLabAPIClient:
                 base_url = env_url
 
         self.token = token
-        self.base_url = base_url.rstrip("/")
+        # Ensure base_url has /api/v4 suffix
+        base_url = base_url.rstrip("/")
+        if not base_url.endswith("/api/v4"):
+            base_url = f"{base_url}/api/v4"
+        self.base_url = base_url
         self.timeout = timeout
         self.logger = logger or logging.getLogger(__name__)
 
