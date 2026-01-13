@@ -183,7 +183,7 @@ jobs:
           else
             echo "Scheduler service account doesn't exist yet, will be created"
           fi
-          
+
           # Import existing secrets if they exist
           for secret in gitlab-token gitlab-url google-application-credentials; do
             if gcloud secrets describe $secret --project=${{ env.GCP_PROJECT_ID }} &>/dev/null; then
