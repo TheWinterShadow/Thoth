@@ -71,7 +71,7 @@ class SecretManagerClient:
 
             # Return the decoded payload
             payload: str = response.payload.data.decode("UTF-8")
-            logger.debug("Successfully retrieved secret %s from Secret Manager", secret_id)
+            logger.debug("Successfully retrieved secret from Secret Manager")
             return payload
 
         except Exception as e:  # noqa: BLE001
