@@ -67,7 +67,7 @@ terraform init -backend=false
 # Apply bootstrap configuration
 echo ""
 echo "2️⃣  Creating state bucket with Terraform..."
-terraform apply -auto-approve \
+TF_CLI_ARGS_apply="-backend=false" terraform apply -auto-approve \
     -target=google_storage_bucket.terraform_state \
     -target=google_storage_bucket_iam_member.github_actions_state_access \
     -var="project_id=$PROJECT_ID" \
