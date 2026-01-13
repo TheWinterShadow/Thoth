@@ -22,8 +22,9 @@ resource "google_secret_manager_secret" "gitlab_token" {
 
 # GitLab token secret version (initially empty, must be set manually or via CLI)
 resource "google_secret_manager_secret_version" "gitlab_token" {
-  secret      = google_secret_manager_secret.gitlab_token.id
-  secret_data = var.gitlab_token != "" ? var.gitlab_token : "PLACEHOLDER_UPDATE_ME"
+  secret = google_secret_manager_secret.gitlab_token.id
+  # Use coalesce to avoid conditional with sensitive value
+  secret_data = coalesce(var.gitlab_token, "PLACEHOLDER_UPDATE_ME")
 
   lifecycle {
     ignore_changes = [secret_data]
@@ -43,8 +44,9 @@ resource "google_secret_manager_secret" "gitlab_url" {
 }
 
 resource "google_secret_manager_secret_version" "gitlab_url" {
-  secret      = google_secret_manager_secret.gitlab_url.id
-  secret_data = var.gitlab_url != "" ? var.gitlab_url : "https://gitlab.com"
+  secret = google_secret_manager_secret.gitlab_url.id
+  # Use coalesce to avoid conditional with variable
+  secret_data = coalesce(var.gitlab_url, "https://gitlab.com")
 
   lifecycle {
     ignore_changes = [secret_data]
@@ -64,8 +66,9 @@ resource "google_secret_manager_secret" "google_credentials" {
 }
 
 resource "google_secret_manager_secret_version" "google_credentials" {
-  secret      = google_secret_manager_secret.google_credentials.id
-  secret_data = var.google_credentials_json != "" ? var.google_credentials_json : "{}"
+  secret = google_secret_manager_secret.google_credentials.id
+  # Use coalesce to avoid conditional with sensitive value
+  secret_data = coalesce(var.google_credentials_json, "{}")
 
   lifecycle {
     ignore_changes = [secret_data]
