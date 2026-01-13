@@ -54,14 +54,9 @@ resource "google_storage_bucket" "terraform_state" {
   }
 }
 
-# Grant GitHub Actions service account access to state bucket
-resource "google_storage_bucket_iam_member" "github_actions_state_access" {
-  bucket = google_storage_bucket.terraform_state.name
-  role   = "roles/storage.objectAdmin"
-  member = "serviceAccount:github-actions@${var.project_id}.iam.gserviceaccount.com"
-
-  depends_on = [google_storage_bucket.terraform_state]
-}
+# Note: IAM permissions for the state bucket should be configured separately
+# after the necessary service accounts are created in the main infrastructure.
+# This includes GitHub Actions and Cloud Run service accounts.
 
 output "state_bucket_name" {
   description = "Name of the Terraform state bucket"
