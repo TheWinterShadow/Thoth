@@ -64,13 +64,21 @@ cd "$(dirname "$0")/../infra"
 echo "🧹 Cleaning existing Terraform state/cache..."
 rm -rf .terraform terraform.tfstate* .terraform.lock.hcl
 
-# Initialize Terraform without backend (for bootstrap)
-echo "1️⃣  Initializing Terraform (local state)..."
-terraform init -backend=false
+# Temporarily override backend configuration for bootstrap
+echo "1️⃣  Creating temporary backend override..."
+cat > backend_override.tf <<'EOF'
+terraform {
+  backend "local" {}
+}
+EOF
+
+# Initialize Terraform with local backend
+echo "2️⃣  Initializing Terraform (local state)..."
+terraform init
 
 # Apply bootstrap configuration
 echo ""
-echo "2️⃣  Creating state bucket with Terraform..."
+echo "3️⃣  Creating state bucket with Terraform..."
 terraform apply -auto-approve \
     -target=google_storage_bucket.terraform_state \
     -target=google_storage_bucket_iam_member.github_actions_state_access \
@@ -87,7 +95,8 @@ fi
 echo ""
 echo "3️⃣  Migrating state to GCS backend..."
 # Migrate state to the new bucket
-terraform init -migrate-state -force-copy
+rm backend_override.tf
+terraform init -migrate-state -force-copy -reconfigure
 
 # Clean up local state files
 echo ""

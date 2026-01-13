@@ -65,8 +65,15 @@ jobs:
             # Clean any existing terraform state/cache
             rm -rf .terraform terraform.tfstate* .terraform.lock.hcl
             
-            # Initialize Terraform without backend (local state for bootstrap)
-            terraform init -backend=false
+            # Temporarily override backend configuration for bootstrap
+            cat > backend_override.tf <<'EOF'
+          terraform {
+            backend "local" {}
+          }
+          EOF
+            
+            # Initialize Terraform with local backend
+            terraform init
             
             # Apply bootstrap configuration only
             terraform apply -auto-approve -input=false \
@@ -75,9 +82,10 @@ jobs:
               -var="project_id=${{ env.GCP_PROJECT_ID }}" \
               -var="region=${{ env.GCP_REGION }}"
             
-            # Move local state to the newly created bucket
+            # Remove backend override and migrate to GCS
+            rm backend_override.tf
             echo "Moving local state to GCS backend..."
-            terraform init -force-copy -backend-config="bucket=thoth-terraform-state"
+            terraform init -force-copy -reconfigure
             
             echo "Bootstrap complete. State bucket created and configured."
           else
