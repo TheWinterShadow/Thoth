@@ -1,9 +1,10 @@
 """Vector store module for managing document embeddings using ChromaDB.
 
 This module provides a wrapper around ChromaDB for storing and querying
-document embeddings with CRUD operations.
+document embeddings with CRUD operations and optional GCS backup.
 """
 
+import importlib.util
 import logging
 from pathlib import Path
 from typing import Any
@@ -19,7 +20,8 @@ logger = logging.getLogger(__name__)
 class VectorStore:
     """Vector store for managing document embeddings using ChromaDB.
 
-    Provides CRUD operations for document storage and similarity search.
+    Provides CRUD operations for document storage, similarity search,
+    and optional Google Cloud Storage backup/restore.
     """
 
     def __init__(
@@ -27,6 +29,8 @@ class VectorStore:
         persist_directory: str = "./chroma_db",
         collection_name: str = "thoth_documents",
         embedder: Embedder | None = None,
+        gcs_bucket_name: str | None = None,
+        gcs_project_id: str | None = None,
     ):
         """Initialize the ChromaDB vector store.
 
@@ -35,6 +39,8 @@ class VectorStore:
             collection_name: Name of the ChromaDB collection
             embedder: Optional Embedder instance for generating embeddings.
                 If not provided, a default Embedder with all-MiniLM-L6-v2 will be created.
+            gcs_bucket_name: Optional GCS bucket name for cloud backup
+            gcs_project_id: Optional GCP project ID for GCS
         """
         self.persist_directory = Path(persist_directory)
         self.collection_name = collection_name
@@ -55,6 +61,26 @@ class VectorStore:
         self.collection = self.client.get_or_create_collection(
             name=self.collection_name, metadata={"hnsw:space": "cosine"}
         )
+
+        # Initialize GCS sync if bucket is provided
+        self.gcs_sync = None
+        if gcs_bucket_name:
+            # Check if GCS module is available
+            if importlib.util.find_spec("google.cloud.storage") is not None:
+                try:
+                    from thoth.ingestion.gcs_sync import GCSSync  # noqa: PLC0415
+
+                    self.gcs_sync = GCSSync(
+                        bucket_name=gcs_bucket_name,
+                        project_id=gcs_project_id,
+                    )
+                    logger.info(f"GCS sync enabled with bucket: {gcs_bucket_name}")
+                except ImportError as e:
+                    logger.warning(f"Failed to initialize GCS sync: {e}")
+                    self.gcs_sync = None
+            else:
+                logger.warning("google-cloud-storage not installed, GCS sync disabled")
+                self.gcs_sync = None
 
         logger.info(f"Initialized VectorStore with collection '{collection_name}' at '{persist_directory}'")
         logger.info(f"Using embedder: {self.embedder.model_name}")
@@ -258,3 +284,121 @@ class VectorStore:
             name=self.collection_name, metadata={"hnsw:space": "cosine"}
         )
         logger.warning(f"Reset collection '{self.collection_name}'")
+
+    def backup_to_gcs(self, backup_name: str | None = None) -> str | None:
+        """Backup vector store to Google Cloud Storage.
+
+        Args:
+            backup_name: Optional name for the backup (defaults to timestamp)
+
+        Returns:
+            GCS prefix of the backup, or None if GCS sync not configured
+
+        Raises:
+            Exception: If backup fails
+        """
+        if not self.gcs_sync:
+            logger.warning("GCS sync not configured. Cannot backup to GCS.")
+            return None
+
+        try:
+            prefix = self.gcs_sync.backup_to_gcs(self.persist_directory, backup_name=backup_name)
+            logger.info(f"Successfully backed up to GCS: {prefix}")
+            return prefix
+        except Exception:
+            logger.exception("Failed to backup to GCS")
+            raise
+
+    def restore_from_gcs(
+        self,
+        backup_name: str | None = None,
+        gcs_prefix: str | None = None,
+    ) -> int:
+        """Restore vector store from Google Cloud Storage.
+
+        Args:
+            backup_name: Name of backup to restore (looks in backups/ folder)
+            gcs_prefix: Direct GCS prefix to restore from
+
+        Returns:
+            Number of files restored
+
+        Raises:
+            ValueError: If neither backup_name nor gcs_prefix is provided
+            Exception: If restore fails
+        """
+        if not self.gcs_sync:
+            logger.warning("GCS sync not configured. Cannot restore from GCS.")
+            return 0
+
+        try:
+            if backup_name:
+                count = self.gcs_sync.restore_from_backup(backup_name, self.persist_directory, clean_local=True)
+            elif gcs_prefix:
+                result = self.gcs_sync.sync_from_gcs(gcs_prefix, self.persist_directory, clean_local=True)
+                downloaded = result["downloaded_files"]
+                count = downloaded if isinstance(downloaded, int) else 0
+            else:
+                msg = "Must provide either backup_name or gcs_prefix"
+                raise ValueError(msg)
+
+            logger.info(f"Successfully restored {count} files from GCS")
+
+            # Reinitialize ChromaDB client after restore
+            self.client = chromadb.PersistentClient(
+                path=str(self.persist_directory),
+                settings=Settings(anonymized_telemetry=False, allow_reset=True),
+            )
+            self.collection = self.client.get_or_create_collection(
+                name=self.collection_name, metadata={"hnsw:space": "cosine"}
+            )
+
+            return count
+        except Exception:
+            logger.exception("Failed to restore from GCS")
+            raise
+
+    def sync_to_gcs(self, gcs_prefix: str = "chroma_db") -> dict | None:
+        """Sync vector store to Google Cloud Storage.
+
+        Args:
+            gcs_prefix: Prefix in GCS bucket (default: chroma_db)
+
+        Returns:
+            Sync statistics dict, or None if GCS sync not configured
+
+        Raises:
+            Exception: If sync fails
+        """
+        if not self.gcs_sync:
+            logger.warning("GCS sync not configured. Cannot sync to GCS.")
+            return None
+
+        try:
+            result = self.gcs_sync.sync_to_gcs(self.persist_directory, gcs_prefix=gcs_prefix)
+            logger.info(f"Successfully synced to GCS: {result}")
+            return result
+        except Exception:
+            logger.exception("Failed to sync to GCS")
+            raise
+
+    def list_gcs_backups(self) -> list[str]:
+        """List available backups in Google Cloud Storage.
+
+        Returns:
+            List of backup names, or empty list if GCS sync not configured
+
+        Raises:
+            Exception: If listing fails
+        """
+        if not self.gcs_sync:
+            logger.warning("GCS sync not configured.")
+            return []
+
+        try:
+            backups = self.gcs_sync.list_backups()
+            logger.info(f"Found {len(backups)} backups in GCS")
+            return backups
+        except Exception:
+            logger.exception("Failed to list GCS backups")
+            raise

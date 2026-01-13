@@ -11,6 +11,7 @@
    :recursive:
 
    cli
+   health
    ingestion
    mcp_server
    monitoring

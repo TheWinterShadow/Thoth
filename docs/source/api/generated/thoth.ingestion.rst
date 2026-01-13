@@ -30,6 +30,7 @@ thoth.ingestion
 
    chunker
    embedder
+   gcs_sync
    gitlab_api
    pipeline
    repo_manager
