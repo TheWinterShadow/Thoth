@@ -23,6 +23,13 @@ Welcome to the Thoth documentation! This index provides links to all available d
 ### Setup Guides
 - **[Sphinx Setup](SPHINX_SETUP.md)** - Documentation build system configuration
 - **[Coverage Setup](COVERAGE_SETUP.md)** - Test coverage integration guide
+- **[Environment Config](ENVIRONMENT_CONFIG.md)** - Environment configuration guide
+- **[Cloud Run Deployment](CLOUD_RUN_DEPLOYMENT.md)** - Cloud Run deployment instructions
+- **[Secrets Management](SECRETS_SETUP.md)** - Google Cloud Secret Manager setup
+- **[Cloud Scheduler](SCHEDULER_SETUP.md)** - Automated scheduling configuration
+- **[Terraform State Management](TERRAFORM_STATE.md)** - Infrastructure state management
+- **[GitHub Actions](GITHUB_ACTIONS.md)** - CI/CD pipeline setup
+- **[Docker Setup](../DOCKER.md)** - Docker configuration and usage
 
 ### Build Artifacts
 - **[HTML Documentation](build/index.html)** - Built Sphinx documentation

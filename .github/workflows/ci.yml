@@ -131,6 +131,11 @@ jobs:
       - name: Run tests
         run: |
           hatch test
+        env:
+          # Provide fallback env vars for secrets module testing
+          GITLAB_TOKEN: "test-token-for-ci"
+          GITLAB_BASE_URL: "https://gitlab.com"
+          GCP_PROJECT_ID: "test-project"
 
   # Build package
   build:
