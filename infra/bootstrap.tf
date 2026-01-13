@@ -23,18 +23,6 @@
 # 3. GitHub Actions automatically handles bootstrap on first run
 #
 # See docs/TERRAFORM_STATE.md for detailed documentation
-
-# Reference to the Terraform state bucket (created by bootstrap directory)
-data "google_storage_bucket" "terraform_state" {
-  name = "thoth-terraform-state"
-}
-
-output "state_bucket_name" {
-  description = "Name of the Terraform state bucket"
-  value       = data.google_storage_bucket.terraform_state.name
-}
-
-output "state_bucket_url" {
-  description = "URL of the Terraform state bucket"
-  value       = data.google_storage_bucket.terraform_state.url
-}
+# See infra/bootstrap/README.md for bootstrap-specific documentation
+#
+# Note: The terraform_state data source is defined in main.tf
