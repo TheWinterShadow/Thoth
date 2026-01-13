@@ -82,17 +82,8 @@ resource "google_storage_bucket_iam_member" "github_actions_state_access" {
   depends_on = [google_storage_bucket.terraform_state]
 }
 
-# Grant Thoth service account read access to state (for debugging)
-resource "google_storage_bucket_iam_member" "thoth_state_viewer" {
-  bucket = google_storage_bucket.terraform_state.name
-  role   = "roles/storage.objectViewer"
-  member = "serviceAccount:thoth-mcp-sa@${var.project_id}.iam.gserviceaccount.com"
-
-  depends_on = [
-    google_storage_bucket.terraform_state,
-    google_service_account.thoth_mcp
-  ]
-}
+# Note: Thoth service account state viewer access is granted via cloud_run.tf
+# to avoid circular dependencies during bootstrap
 
 output "state_bucket_name" {
   description = "Name of the Terraform state bucket"

@@ -155,6 +155,15 @@ resource "google_project_iam_member" "thoth_mcp_metric_writer" {
   member  = "serviceAccount:${google_service_account.thoth_mcp.email}"
 }
 
+# Grant Thoth service account read access to state bucket (for debugging)
+resource "google_storage_bucket_iam_member" "thoth_state_viewer" {
+  bucket = "thoth-terraform-state"
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.thoth_mcp.email}"
+
+  depends_on = [google_service_account.thoth_mcp]
+}
+
 # IAM policy for Cloud Run service (allow authenticated users)
 resource "google_cloud_run_v2_service_iam_member" "invoker" {
   name     = google_cloud_run_v2_service.thoth_mcp.name
