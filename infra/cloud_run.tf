@@ -66,7 +66,7 @@ resource "google_cloud_run_v2_service" "thoth_mcp" {
         startup_cpu_boost = true
       }
 
-      # Health check
+      # Health checks via HTTP wrapper endpoint
       startup_probe {
         initial_delay_seconds = 10
         timeout_seconds       = 5
@@ -89,19 +89,6 @@ resource "google_cloud_run_v2_service" "thoth_mcp" {
           port = 8080
         }
       }
-
-      # Volume mounts for data persistence
-      volume_mounts {
-        name       = "data"
-        mount_path = "/app/data"
-      }
-    }
-
-    # Volumes
-    volumes {
-      name = "data"
-      # Note: In-memory ephemeral storage
-      # For production, consider using Cloud SQL or Firestore
     }
 
     # Service account

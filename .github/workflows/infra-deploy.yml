@@ -206,28 +206,19 @@ jobs:
               echo "Secret $secret doesn't exist yet, will be created"
             fi
           done
-        working-directory: ${{ env.TF_WORKING_DIR }}
-        continue-on-error: true
 
-      - name: Handle Deletion Protection
-        run: |
-          # Check if Cloud Run service exists and needs deletion protection disabled
+          # Import existing Cloud Run service if it exists
           if gcloud run services describe ${{ env.SERVICE_NAME }} --region=${{ env.GCP_REGION }} &>/dev/null; then
-            echo "Cloud Run service exists, disabling deletion protection..."
-            
-            # Use gcloud to directly update deletion_protection setting
-            gcloud run services update ${{ env.SERVICE_NAME }} \
-              --region=${{ env.GCP_REGION }} \
-              --no-deletion-protection \
-              --quiet || echo "Deletion protection update attempted"
-            
-            # If resource is tainted, untaint it to allow in-place update
-            if terraform state show google_cloud_run_v2_service.thoth_mcp &>/dev/null; then
-              echo "Untainting Cloud Run service if needed..."
-              terraform untaint google_cloud_run_v2_service.thoth_mcp || echo "No taint found"
+            if ! terraform state show google_cloud_run_v2_service.thoth_mcp &>/dev/null; then
+              echo "Importing existing Cloud Run service into Terraform state..."
+              terraform import -var="project_id=${{ env.GCP_PROJECT_ID }}" \
+                -var="region=${{ env.GCP_REGION }}" \
+                google_cloud_run_v2_service.thoth_mcp projects/${{ env.GCP_PROJECT_ID }}/locations/${{ env.GCP_REGION }}/services/${{ env.SERVICE_NAME }} || echo "Import failed or resource already managed"
+            else
+              echo "Cloud Run service already in Terraform state"
             fi
           else
-            echo "Cloud Run service doesn't exist yet, no action needed"
+            echo "Cloud Run service doesn't exist yet, will be created"
           fi
         working-directory: ${{ env.TF_WORKING_DIR }}
         continue-on-error: true

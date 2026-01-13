@@ -54,6 +54,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
+# Copy the application source code
+COPY --from=builder /build/thoth /app/thoth
+
 # Create necessary directories for data persistence
 RUN mkdir -p /app/data/chroma_db /app/data/handbook_vectors /app/data/handbook_repo
 
@@ -61,17 +64,15 @@ RUN mkdir -p /app/data/chroma_db /app/data/handbook_vectors /app/data/handbook_r
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-# MCP uses stdio transport by default, so no ports are exposed here.
-# If you configure the server to use TCP transport instead, you may add:
-# EXPOSE 8000
+# Expose HTTP port for Cloud Run health checks
+EXPOSE 8080
 
 RUN useradd -m -u 1000 thoth && chown -R thoth:thoth /app/data
 USER thoth
 
-# Set the entrypoint to run the MCP server
-ENTRYPOINT ["python", "-c", "from thoth.mcp_server import run_server; run_server()"]
+# Set the entrypoint to run the HTTP wrapper for Cloud Run
+ENTRYPOINT ["python", "-m", "thoth.http_wrapper"]
 
-# Health check to verify the container is running
-# This checks if the Python process is alive
+# Health check to verify the HTTP server is responding
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import sys; sys.exit(0)"
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health').read()"
