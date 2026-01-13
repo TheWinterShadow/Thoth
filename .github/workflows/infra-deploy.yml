@@ -183,6 +183,29 @@ jobs:
           else
             echo "Scheduler service account doesn't exist yet, will be created"
           fi
+          
+          # Import existing secrets if they exist
+          for secret in gitlab-token gitlab-url google-application-credentials; do
+            if gcloud secrets describe $secret --project=${{ env.GCP_PROJECT_ID }} &>/dev/null; then
+              # Map secret ID to Terraform resource name
+              case $secret in
+                gitlab-token) resource="google_secret_manager_secret.gitlab_token" ;;
+                gitlab-url) resource="google_secret_manager_secret.gitlab_url" ;;
+                google-application-credentials) resource="google_secret_manager_secret.google_credentials" ;;
+              esac
+              
+              if ! terraform state show $resource &>/dev/null; then
+                echo "Importing existing secret $secret into Terraform state..."
+                terraform import -var="project_id=${{ env.GCP_PROJECT_ID }}" \
+                  -var="region=${{ env.GCP_REGION }}" \
+                  $resource projects/${{ env.GCP_PROJECT_ID }}/secrets/$secret || echo "Import failed or resource already managed"
+              else
+                echo "Secret $secret already in Terraform state"
+              fi
+            else
+              echo "Secret $secret doesn't exist yet, will be created"
+            fi
+          done
         working-directory: ${{ env.TF_WORKING_DIR }}
         continue-on-error: true
 
