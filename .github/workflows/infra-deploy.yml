@@ -248,8 +248,8 @@ jobs:
         id: outputs
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         run: |
-          BUCKET_NAME=$(terraform output -raw storage_bucket_name || echo "thoth-storage-bucket")
-          echo "bucket_name=$BUCKET_NAME" >> $GITHUB_OUTPUT
+          BUCKET_NAME=$(terraform output -raw bucket_name 2>/dev/null || echo "thoth-storage-bucket")
+          echo "bucket_name=${BUCKET_NAME}" >> $GITHUB_OUTPUT
 
           # Display secret setup instructions
           echo "## 📝 Post-Deployment Steps" >> $GITHUB_STEP_SUMMARY
