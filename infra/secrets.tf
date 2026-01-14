@@ -53,6 +53,28 @@ resource "google_secret_manager_secret_version" "gitlab_url" {
   }
 }
 
+# API Key secret for HTTP endpoint authentication
+resource "google_secret_manager_secret" "api_key" {
+  secret_id = "api-key"
+  project   = var.project_id
+
+  replication {
+    auto {}
+  }
+
+  depends_on = [google_project_service.secret_manager]
+}
+
+resource "google_secret_manager_secret_version" "api_key" {
+  secret = google_secret_manager_secret.api_key.id
+  # Generate a random API key initially
+  secret_data = coalesce(var.api_key, "PLACEHOLDER_UPDATE_ME")
+
+  lifecycle {
+    ignore_changes = [secret_data]
+  }
+}
+
 # Google Cloud credentials secret (for service account keys if needed)
 resource "google_secret_manager_secret" "google_credentials" {
   secret_id = "google-application-credentials"
@@ -97,6 +119,13 @@ resource "google_secret_manager_secret_iam_member" "thoth_mcp_google_credentials
   member    = "serviceAccount:${google_service_account.thoth_mcp.email}"
 }
 
+resource "google_secret_manager_secret_iam_member" "thoth_mcp_api_key_access" {
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.api_key.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.thoth_mcp.email}"
+}
+
 # Outputs
 output "gitlab_token_secret_name" {
   description = "Name of the GitLab token secret"
@@ -113,6 +142,11 @@ output "google_credentials_secret_name" {
   value       = google_secret_manager_secret.google_credentials.secret_id
 }
 
+output "api_key_secret_name" {
+  description = "Name of the API key secret"
+  value       = google_secret_manager_secret.api_key.secret_id
+}
+
 output "secret_manager_instructions" {
   description = "Instructions for updating secrets"
   value       = <<-EOT
@@ -120,6 +154,9 @@ output "secret_manager_instructions" {
     
     # Update GitLab token
     echo -n "YOUR_GITLAB_TOKEN" | gcloud secrets versions add gitlab-token --data-file=- --project=${var.project_id}
+    
+    # Update API key (generate a secure random key)
+    openssl rand -base64 32 | tr -d '\n' | gcloud secrets versions add api-key --data-file=- --project=${var.project_id}
     
     # Update GitLab URL (if using self-hosted)
     echo -n "https://your-gitlab-instance.com" | gcloud secrets versions add gitlab-url --data-file=- --project=${var.project_id}

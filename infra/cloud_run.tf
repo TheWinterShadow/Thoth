@@ -2,7 +2,7 @@
 resource "google_cloud_run_v2_service" "thoth_mcp" {
   name                = "thoth-mcp-server"
   location            = var.region
-  ingress             = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+  ingress             = "INGRESS_TRAFFIC_ALL"
   deletion_protection = false
 
   template {
@@ -152,13 +152,19 @@ resource "google_storage_bucket_iam_member" "thoth_state_viewer" {
   depends_on = [google_service_account.thoth_mcp]
 }
 
-# IAM policy for Cloud Run service (allow authenticated users)
-resource "google_cloud_run_v2_service_iam_member" "invoker" {
-  name     = google_cloud_run_v2_service.thoth_mcp.name
-  location = google_cloud_run_v2_service.thoth_mcp.location
-  role     = "roles/run.invoker"
-  member   = "allAuthenticatedUsers"
-}
+# IAM policy for Cloud Run service
+# By default, no public access - callers must authenticate with Google Cloud ID token
+# Grant invoker role to specific service accounts or users who need access
+
+# Note: To call this service, users need:
+# 1. IAM permission (roles/run.invoker) on the service
+# 2. Valid Google Cloud ID token in Authorization header
+#
+# To add a user: gcloud run services add-iam-policy-binding thoth-mcp-server \
+#   --region=us-central1 --member="user:email@example.com" --role="roles/run.invoker"
+#
+# To add a service account: gcloud run services add-iam-policy-binding thoth-mcp-server \
+#   --region=us-central1 --member="serviceAccount:sa@project.iam.gserviceaccount.com" --role="roles/run.invoker"
 
 # Output service URL
 output "service_url" {

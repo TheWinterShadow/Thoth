@@ -1,26 +1,34 @@
 """HTTP wrapper for MCP server to work with Cloud Run.
 
-This module provides a simple HTTP server that keeps the container alive
-and provides a health endpoint for Cloud Run probes. The MCP server itself
-uses stdio transport and is not directly accessible via HTTP.
+This module provides both health check endpoints and SSE transport
+for the MCP server to enable remote connections from clients like Claude Desktop.
+
+Authentication is handled at the Cloud Run ingress level via IAM.
 """
 
-import asyncio
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import logging
-import sys
-import threading
 from typing import Any
 
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from starlette.routing import Route
+import uvicorn
+
 from thoth.health import HealthCheck
+from thoth.mcp_server.server import ThothMCPServer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 class HealthHTTPHandler(BaseHTTPRequestHandler):
-    """Simple HTTP handler for health checks."""
+    """Simple HTTP handler for health checks.
+
+    Authentication is handled at the Cloud Run ingress level via IAM.
+    Requests reaching this handler have already passed IAM authentication.
+    """
 
     def do_GET(self) -> None:
         """Handle GET requests."""
@@ -63,22 +71,30 @@ def run_health_server(port: int = 8080) -> None:
 
 def main() -> None:
     """Main entry point for Cloud Run deployment."""
-    logger.info("Starting Thoth MCP Server (Cloud Run mode)")
+    logger.info("Starting Thoth MCP Server (Cloud Run mode with SSE)")
 
-    # Start HTTP health server in background thread
-    health_thread = threading.Thread(target=run_health_server, daemon=True)
-    health_thread.start()
+    # Create MCP server instance
+    mcp_server = ThothMCPServer()
+    sse_app = mcp_server.get_sse_app()
 
-    # Keep the main thread alive
-    try:
-        # Just sleep forever - the container stays alive for health checks
-        # MCP server functionality would need a different invocation method
-        # (e.g., triggered via Cloud Functions or Cloud Run Jobs)
-        while True:
-            asyncio.run(asyncio.sleep(60))
-    except KeyboardInterrupt:
-        logger.info("Shutting down")
-        sys.exit(0)
+    # Add health check route to SSE app
+    async def health_check(_request: Request) -> JSONResponse:
+        status = HealthCheck.get_health_status()
+        return JSONResponse(status, status_code=200 if status["status"] == "healthy" else 503)
+
+    # Add health route to existing SSE routes
+    sse_app.routes.append(Route("/health", endpoint=health_check))
+    sse_app.routes.append(Route("/", endpoint=health_check))
+
+    # Run Uvicorn server with ASGI app
+    logger.info("Starting Uvicorn server on port 8080")
+    uvicorn.run(
+        sse_app,
+        host="0.0.0.0",  # nosec B104 - Required for Cloud Run
+        port=8080,
+        log_level="info",
+        access_log=True,
+    )
 
 
 if __name__ == "__main__":

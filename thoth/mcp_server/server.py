@@ -33,11 +33,15 @@ from typing import Any
 
 from git import GitCommandError, InvalidGitRepositoryError, Repo
 from mcp.server import Server
+from mcp.server.sse import SseServerTransport
 from mcp.server.stdio import stdio_server
 from mcp.types import (
     TextContent,
     Tool,
 )
+from starlette.applications import Starlette
+from starlette.routing import Route
+from starlette.types import Receive, Scope, Send
 
 from thoth.ingestion.vector_store import VectorStore
 from thoth.utils.logger import setup_logger
@@ -1023,6 +1027,31 @@ class ThothMCPServer:
 
         async with stdio_server() as (read_stream, write_stream):
             await self.server.run(read_stream, write_stream, self.server.create_initialization_options())
+
+    def get_sse_app(self) -> Starlette:
+        """Create Starlette app with SSE transport for remote MCP connections.
+
+        Returns:
+            Starlette: ASGI application with SSE endpoints for MCP protocol
+        """
+        sse = SseServerTransport("/messages")
+
+        async def handle_sse(scope: Scope, receive: Receive, send: Send) -> None:
+            """Handle SSE connection using raw ASGI interface."""
+            async with sse.connect_sse(scope, receive, send) as streams:
+                await self.server.run(streams[0], streams[1], self.server.create_initialization_options())
+
+        async def handle_messages(scope: Scope, receive: Receive, send: Send) -> None:
+            """Handle POST messages using raw ASGI interface."""
+            await sse.handle_post_message(scope, receive, send)
+
+        return Starlette(
+            debug=True,
+            routes=[
+                Route("/sse", endpoint=handle_sse),
+                Route("/messages", endpoint=handle_messages, methods=["POST"]),
+            ],
+        )
 
 
 async def invoker() -> None:

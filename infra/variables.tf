@@ -56,3 +56,10 @@ variable "google_credentials_json" {
   default     = ""
   sensitive   = true
 }
+
+variable "api_key" {
+  description = "API key for HTTP endpoint authentication (optional, update via gcloud)"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
