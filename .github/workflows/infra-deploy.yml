@@ -1,4 +1,4 @@
-name: "Infrastructure & Cloud Run Deploy"
+name: "Infrastructure & Lambda Deploy"
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
     paths:
       - "infra/**"
       - "thoth/**"
-      - "Dockerfile"
+      - "lambda/**"
       - ".github/workflows/infra-deploy.yml"
   workflow_dispatch:
     inputs:
@@ -15,8 +15,8 @@ on:
         description: "Skip Terraform deployment"
         required: false
         default: "false"
-      skip_cloud_run:
-        description: "Skip Cloud Run deployment"
+      skip_lambda:
+        description: "Skip Lambda deployment"
         required: false
         default: "false"
 
@@ -26,64 +26,17 @@ permissions:
 
 env:
   TF_WORKING_DIR: ./infra
-  GCP_PROJECT_ID: thoth-483015
-  GCP_REGION: us-central1
-  SERVICE_NAME: thoth-mcp-server
-  IMAGE_NAME: thoth-mcp
+  AWS_REGION: us-east-1
+  ENVIRONMENT: dev
 
 jobs:
-  build_image:
-    name: "Build and Push Docker Image"
-    runs-on: ubuntu-latest
-    if: github.event.inputs.skip_cloud_run != 'true'
-    outputs:
-      image_tag: ${{ steps.image.outputs.tag }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
-        with:
-          project_id: ${{ env.GCP_PROJECT_ID }}
-
-      - name: Configure Docker for GCR
-        run: gcloud auth configure-docker
-
-      - name: Build Docker Image
-        run: |
-          docker build \
-            --build-arg BUILDKIT_INLINE_CACHE=1 \
-            --cache-from gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}:latest \
-            -t gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
-            -t gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}:latest \
-            .
-
-      - name: Push Docker Image
-        run: |
-          docker push gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-          docker push gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}:latest
-
-      - name: Set Output
-        id: image
-        run: echo "tag=${{ github.sha }}" >> $GITHUB_OUTPUT
-
   terraform:
     name: "Provision Infrastructure"
     runs-on: ubuntu-latest
-    needs: build_image
-    if: |
-      always() &&
-      (needs.build_image.result == 'success' || needs.build_image.result == 'skipped') &&
-      github.event.inputs.skip_terraform != 'true'
+    if: github.event.inputs.skip_terraform != 'true'
     outputs:
-      bucket_name: ${{ steps.outputs.outputs.bucket_name }}
+      api_url: ${{ steps.outputs.outputs.api_url }}
+      lambda_function_name: ${{ steps.outputs.outputs.lambda_function_name }}
 
     steps:
       - name: Checkout
@@ -94,149 +47,58 @@ jobs:
         with:
           terraform_version: 1.6.0
 
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          credentials_json: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
-
-      - name: Bootstrap Terraform State Bucket
+      - name: Bootstrap Terraform State
         run: |
-          # Check if state bucket exists
-          if ! gsutil ls -b gs://thoth-terraform-state &>/dev/null; then
+          cd bootstrap
+          if ! aws s3 ls s3://thoth-terraform-state &>/dev/null; then
             echo "State bucket doesn't exist. Running Terraform bootstrap..."
-            
-            # Run bootstrap from separate directory to avoid validation issues
-            cd bootstrap
-            
-            # Initialize and apply bootstrap
             terraform init
             terraform apply -auto-approve -input=false \
-              -var="project_id=${{ env.GCP_PROJECT_ID }}" \
-              -var="region=${{ env.GCP_REGION }}"
-            
-            cd ..
-            echo "Bootstrap complete. State bucket created."
+              -var="region=${{ env.AWS_REGION }}" \
+              -var="environment=${{ env.ENVIRONMENT }}"
+            echo "Bootstrap complete."
           else
             echo "State bucket already exists. Skipping bootstrap."
           fi
-        working-directory: ${{ env.TF_WORKING_DIR }}
+        continue-on-error: true
 
       - name: Terraform Init
         id: init
-        run: terraform init -reconfigure
+        run: |
+          terraform init \
+            -backend-config="bucket=thoth-terraform-state" \
+            -backend-config="key=terraform/state" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=thoth-terraform-state-lock"
         working-directory: ${{ env.TF_WORKING_DIR }}
 
       - name: Terraform Format Check
         id: fmt
         run: terraform fmt -check -recursive
         working-directory: ${{ env.TF_WORKING_DIR }}
-        continue-on-error: true
 
       - name: Terraform Validate
         id: validate
         run: terraform validate
         working-directory: ${{ env.TF_WORKING_DIR }}
 
-      - name: Import Existing Resources
-        run: |
-          # Import existing bucket if it exists and isn't in state
-          if gsutil ls -b gs://thoth-storage-bucket &>/dev/null; then
-            if ! terraform state show google_storage_bucket.thoth_bucket &>/dev/null; then
-              echo "Importing existing bucket into Terraform state..."
-              terraform import -var="project_id=${{ env.GCP_PROJECT_ID }}" \
-                -var="region=${{ env.GCP_REGION }}" \
-                google_storage_bucket.thoth_bucket thoth-storage-bucket || echo "Import failed or resource already managed"
-            else
-              echo "Bucket already in Terraform state"
-            fi
-          else
-            echo "Bucket doesn't exist yet, will be created"
-          fi
-
-          # Import existing service account if it exists and isn't in state
-          if gcloud iam service-accounts describe thoth-mcp-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com &>/dev/null; then
-            if ! terraform state show google_service_account.thoth_mcp &>/dev/null; then
-              echo "Importing existing service account into Terraform state..."
-              terraform import -var="project_id=${{ env.GCP_PROJECT_ID }}" \
-                -var="region=${{ env.GCP_REGION }}" \
-                google_service_account.thoth_mcp projects/${{ env.GCP_PROJECT_ID }}/serviceAccounts/thoth-mcp-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com || echo "Import failed or resource already managed"
-            else
-              echo "Service account already in Terraform state"
-            fi
-          else
-            echo "Service account doesn't exist yet, will be created"
-          fi
-
-          # Import scheduler service account if it exists
-          if gcloud iam service-accounts describe thoth-scheduler@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com &>/dev/null; then
-            if ! terraform state show google_service_account.scheduler &>/dev/null; then
-              echo "Importing existing scheduler service account into Terraform state..."
-              terraform import -var="project_id=${{ env.GCP_PROJECT_ID }}" \
-                -var="region=${{ env.GCP_REGION }}" \
-                google_service_account.scheduler projects/${{ env.GCP_PROJECT_ID }}/serviceAccounts/thoth-scheduler@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com || echo "Import failed or resource already managed"
-            else
-              echo "Scheduler service account already in Terraform state"
-            fi
-          else
-            echo "Scheduler service account doesn't exist yet, will be created"
-          fi
-
-          # Import existing secrets if they exist
-          for secret in gitlab-token gitlab-url google-application-credentials; do
-            if gcloud secrets describe $secret --project=${{ env.GCP_PROJECT_ID }} &>/dev/null; then
-              # Map secret ID to Terraform resource name
-              case $secret in
-                gitlab-token) resource="google_secret_manager_secret.gitlab_token" ;;
-                gitlab-url) resource="google_secret_manager_secret.gitlab_url" ;;
-                google-application-credentials) resource="google_secret_manager_secret.google_credentials" ;;
-              esac
-              
-              if ! terraform state show $resource &>/dev/null; then
-                echo "Importing existing secret $secret into Terraform state..."
-                terraform import -var="project_id=${{ env.GCP_PROJECT_ID }}" \
-                  -var="region=${{ env.GCP_REGION }}" \
-                  $resource projects/${{ env.GCP_PROJECT_ID }}/secrets/$secret || echo "Import failed or resource already managed"
-              else
-                echo "Secret $secret already in Terraform state"
-              fi
-            else
-              echo "Secret $secret doesn't exist yet, will be created"
-            fi
-          done
-
-          # Import existing Cloud Run service if it exists
-          if gcloud run services describe ${{ env.SERVICE_NAME }} --region=${{ env.GCP_REGION }} &>/dev/null; then
-            if ! terraform state show google_cloud_run_v2_service.thoth_mcp &>/dev/null; then
-              echo "Importing existing Cloud Run service into Terraform state..."
-              terraform import -var="project_id=${{ env.GCP_PROJECT_ID }}" \
-                -var="region=${{ env.GCP_REGION }}" \
-                google_cloud_run_v2_service.thoth_mcp projects/${{ env.GCP_PROJECT_ID }}/locations/${{ env.GCP_REGION }}/services/${{ env.SERVICE_NAME }} || echo "Import failed or resource already managed"
-            else
-              echo "Cloud Run service already in Terraform state"
-            fi
-          else
-            echo "Cloud Run service doesn't exist yet, will be created"
-          fi
-        working-directory: ${{ env.TF_WORKING_DIR }}
-        continue-on-error: true
-
       - name: Terraform Plan
         id: plan
         run: |
           terraform plan -no-color -input=false -out=tfplan \
-            -var="project_id=${{ env.GCP_PROJECT_ID }}" \
-            -var="region=${{ env.GCP_REGION }}"
+            -var="aws_region=${{ env.AWS_REGION }}" \
+            -var="environment=${{ env.ENVIRONMENT }}"
           echo "## Terraform Plan" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`terraform" >> $GITHUB_STEP_SUMMARY
           terraform show -no-color tfplan >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
         working-directory: ${{ env.TF_WORKING_DIR }}
-        env:
-          TF_VAR_gitlab_token: "" # Will be set in Secret Manager post-deployment
-          TF_VAR_gitlab_url: "" # Will be set in Secret Manager post-deployment
 
       - name: Terraform Apply
         id: apply
@@ -248,111 +110,58 @@ jobs:
         id: outputs
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         run: |
-          BUCKET_NAME=$(terraform output -raw bucket_name 2>/dev/null || echo "thoth-storage-bucket")
-          echo "bucket_name=${BUCKET_NAME}" >> $GITHUB_OUTPUT
-
-          # Display secret setup instructions
-          echo "## 📝 Post-Deployment Steps" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Update Secrets in Secret Manager" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-          echo "# Update GitLab token" >> $GITHUB_STEP_SUMMARY
-          echo "echo -n 'YOUR_GITLAB_TOKEN' | gcloud secrets versions add gitlab-token --data-file=- --project=${{ env.GCP_PROJECT_ID }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "# Test scheduler jobs" >> $GITHUB_STEP_SUMMARY
-          echo "gcloud scheduler jobs run thoth-daily-sync --location=${{ env.GCP_REGION }} --project=${{ env.GCP_PROJECT_ID }}" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          API_URL=$(terraform output -raw api_gateway_url 2>/dev/null || echo "")
+          LAMBDA_NAME=$(terraform output -raw lambda_function_name 2>/dev/null || echo "")
+          echo "api_url=${API_URL}" >> $GITHUB_OUTPUT
+          echo "lambda_function_name=${LAMBDA_NAME}" >> $GITHUB_OUTPUT
         working-directory: ${{ env.TF_WORKING_DIR }}
 
-  deploy_cloud_run:
-    name: "Deploy to Cloud Run"
+  build_and_deploy_lambda:
+    name: "Build and Deploy Lambda"
     runs-on: ubuntu-latest
-    needs: [build_image, terraform]
+    needs: terraform
     if: |
-      always() && 
+      always() &&
       (needs.terraform.result == 'success' || needs.terraform.result == 'skipped') &&
-      (needs.build_image.result == 'success' || needs.build_image.result == 'skipped') &&
-      github.event.inputs.skip_cloud_run != 'true'
+      github.event.inputs.skip_lambda != 'true'
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          credentials_json: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
-        with:
-          project_id: ${{ env.GCP_PROJECT_ID }}
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Deploy to Cloud Run
-        id: deploy
+      - name: Build and Push Container Image
+        env:
+          ECR_REPOSITORY: thoth-mcp
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          gcloud run deploy ${{ env.SERVICE_NAME }} \
-            --image gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
-            --region ${{ env.GCP_REGION }} \
-            --platform managed \
-            --allow-unauthenticated \
-            --set-env-vars "GCS_BUCKET_NAME=${{ needs.terraform.outputs.bucket_name || 'thoth-storage-bucket' }}" \
-            --set-env-vars "GCP_PROJECT_ID=${{ env.GCP_PROJECT_ID }}" \
-            --memory 2Gi \
-            --cpu 2 \
-            --timeout 300 \
-            --min-instances 0 \
-            --max-instances 10 \
-            --concurrency 80
+          docker build -t $ECR_REPOSITORY:$IMAGE_TAG -f lambda/Dockerfile .
+          docker tag $ECR_REPOSITORY:$IMAGE_TAG ${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push ${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:$IMAGE_TAG
+          docker tag $ECR_REPOSITORY:$IMAGE_TAG ${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:latest
+          docker push ${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:latest
 
-      - name: Get Service URL
-        id: url
+      - name: Update Lambda Function
         run: |
-          SERVICE_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
-            --region ${{ env.GCP_REGION }} \
-            --format 'value(status.url)')
-          echo "service_url=$SERVICE_URL" >> $GITHUB_OUTPUT
-          echo "## Deployment Successful! 🚀" >> $GITHUB_STEP_SUMMARY
-          echo "Service URL: $SERVICE_URL" >> $GITHUB_STEP_SUMMARY
+          FUNCTION_NAME=$(terraform output -raw refresh_lambda_function_name)
+          aws lambda update-function-code \
+            --function-name $FUNCTION_NAME \
+            --image-uri ${{ steps.login-ecr.outputs.registry }}/thoth-mcp:${{ github.sha }} \
+            --region ${{ env.AWS_REGION }}
 
       - name: Verify Deployment
         run: |
-          SERVICE_URL="${{ steps.url.outputs.service_url }}"
-          echo "Waiting for service to be ready..."
-          sleep 10
-
-          # Check health endpoint
-          HEALTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${SERVICE_URL}/health" || echo "000")
-
-          if [ "$HEALTH_STATUS" = "200" ]; then
-            echo "✅ Health check passed!"
-            echo "### Health Check: ✅ PASSED" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "⚠️  Health check returned status: $HEALTH_STATUS"
-            echo "### Health Check: ⚠️  Status $HEALTH_STATUS" >> $GITHUB_STEP_SUMMARY
+          API_URL="${{ needs.terraform.outputs.api_url }}"
+          if [ -n "$API_URL" ]; then
+            echo "## Deployment Successful! 🚀" >> $GITHUB_STEP_SUMMARY
+            echo "API URL: $API_URL" >> $GITHUB_STEP_SUMMARY
           fi
-
-          # Get recent logs
-          echo "### Recent Logs" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=${{ env.SERVICE_NAME }}" \
-            --limit 20 --format "value(textPayload)" >> $GITHUB_STEP_SUMMARY || echo "No logs available yet"
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-
-      - name: Verify Secrets and Scheduler
-        run: |
-          echo "### Infrastructure Components" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          # Check secrets
-          echo "#### Secrets (Secret Manager)" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          gcloud secrets list --project=${{ env.GCP_PROJECT_ID }} --filter="name~gitlab OR name~google-application" --format="table(name,createTime)" >> $GITHUB_STEP_SUMMARY || echo "No secrets found"
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          # Check scheduler jobs
-          echo "#### Scheduler Jobs" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          gcloud scheduler jobs list --location=${{ env.GCP_REGION }} --project=${{ env.GCP_PROJECT_ID }} --format="table(name,schedule,state)" >> $GITHUB_STEP_SUMMARY || echo "No scheduler jobs found"
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY

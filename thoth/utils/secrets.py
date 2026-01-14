@@ -1,49 +1,53 @@
-"""Google Cloud Secret Manager integration for secure credential management."""
+"""AWS Secrets Manager integration for secure credential management."""
 
 from functools import lru_cache
 import logging
 import os
 from typing import Any
 
+try:
+    import boto3
+except ImportError:
+    boto3 = None  # type: ignore[assignment, unused-ignore]
+
 logger = logging.getLogger(__name__)
 
 
 class SecretManagerClient:
-    """Client for accessing secrets from Google Cloud Secret Manager."""
+    """Client for accessing secrets from AWS Secrets Manager."""
 
-    def __init__(self, project_id: str | None = None):
-        """Initialize Secret Manager client.
+    def __init__(self, region: str | None = None):
+        """Initialize Secrets Manager client.
 
         Args:
-            project_id: GCP project ID. If not provided, will use GCP_PROJECT_ID env var.
+            region: AWS region. If not provided, will use AWS_REGION env var or us-east-1.
         """
-        self.project_id = project_id or os.getenv("GCP_PROJECT_ID")
+        self.region = region or os.getenv("AWS_REGION", "us-east-1")
         self._client: Any = None
 
     def _get_client(self) -> Any:
-        """Lazy load the Secret Manager client."""
+        """Lazy load the Secrets Manager client."""
         if self._client is None:
             try:
-                from google.cloud import secretmanager  # noqa: PLC0415
-
-                self._client = secretmanager.SecretManagerServiceClient()
-            except ImportError:
-                logger.warning("google-cloud-secret-manager not installed. Falling back to environment variables.")
-                self._client = False  # Mark as unavailable
+                if boto3 is None:
+                    logger.warning("boto3 not installed. Falling back to environment variables.")
+                    self._client = False  # Mark as unavailable
+                else:
+                    self._client = boto3.client("secretsmanager", region_name=self.region)
             except Exception as e:  # noqa: BLE001
-                logger.warning("Failed to initialize Secret Manager client: %s", e)
+                logger.warning("Failed to initialize Secrets Manager client: %s", e)
                 self._client = False
         return self._client if self._client else None
 
     @lru_cache(  # noqa: B019 - Acceptable for singleton pattern with limited cache size
         maxsize=32
     )
-    def get_secret(self, secret_id: str, version: str = "latest") -> str | None:
-        """Get a secret value from Secret Manager.
+    def get_secret(self, secret_name: str, version_stage: str = "AWSCURRENT") -> str | None:
+        """Get a secret value from Secrets Manager.
 
         Args:
-            secret_id: The ID of the secret to retrieve
-            version: The version of the secret (default: "latest")
+            secret_name: The name or ARN of the secret to retrieve
+            version_stage: The version stage of the secret (default: "AWSCURRENT")
 
         Returns:
             The secret value as a string, or None if not found
@@ -52,32 +56,25 @@ class SecretManagerClient:
 
         if not client:
             # Fallback to environment variables
-            env_var = secret_id.upper().replace("-", "_")
+            env_var = secret_name.upper().replace("-", "_").replace("/", "_")
             value = os.getenv(env_var)
             if value:
                 logger.debug("Using environment variable fallback for secret")
             return value
 
-        if not self.project_id:
-            logger.warning("GCP_PROJECT_ID not set, cannot access Secret Manager")
-            return None
-
         try:
-            # Build the resource name of the secret version
-            name = f"projects/{self.project_id}/secrets/{secret_id}/versions/{version}"
+            # Get the secret value
+            response = client.get_secret_value(SecretId=secret_name, VersionStage=version_stage)
 
-            # Access the secret version
-            response = client.access_secret_version(request={"name": name})
-
-            # Return the decoded payload
-            payload: str = response.payload.data.decode("UTF-8")
-            logger.debug("Successfully retrieved secret from Secret Manager")
-            return payload
+            # Return the secret string
+            secret_string: str = response.get("SecretString", "")
+            logger.debug("Successfully retrieved secret from Secrets Manager")
+            return secret_string
 
         except Exception as e:  # noqa: BLE001
-            logger.warning("Failed to retrieve secret from Secret Manager: %s", e)
+            logger.warning("Failed to retrieve secret from Secrets Manager: %s", e)
             # Fallback to environment variable
-            env_var = secret_id.upper().replace("-", "_")
+            env_var = secret_name.upper().replace("-", "_").replace("/", "_")
             return os.getenv(env_var)
 
     def get_gitlab_token(self) -> str | None:
@@ -86,7 +83,17 @@ class SecretManagerClient:
         Returns:
             GitLab token or None
         """
-        return self.get_secret("gitlab-token")
+        # Try multiple possible secret names
+        secret_names = [
+            "thoth/dev/gitlab-token",
+            "thoth/gitlab-token",
+            "gitlab-token",
+        ]
+        for secret_name in secret_names:
+            token = self.get_secret(secret_name)
+            if token:
+                return token
+        return None
 
     def get_gitlab_url(self) -> str:
         """Get GitLab base URL.
@@ -94,15 +101,35 @@ class SecretManagerClient:
         Returns:
             GitLab URL (defaults to https://gitlab.com)
         """
-        return self.get_secret("gitlab-url") or "https://gitlab.com"
+        # Try multiple possible secret names
+        secret_names = [
+            "thoth/dev/gitlab-url",
+            "thoth/gitlab-url",
+            "gitlab-url",
+        ]
+        for secret_name in secret_names:
+            url = self.get_secret(secret_name)
+            if url:
+                return url
+        return "https://gitlab.com"
 
-    def get_google_credentials(self) -> str | None:
-        """Get Google application credentials JSON.
+    def get_api_key(self) -> str | None:
+        """Get API key for HTTP endpoint authentication.
 
         Returns:
-            Credentials JSON string or None
+            API key or None
         """
-        return self.get_secret("google-application-credentials")
+        # Try multiple possible secret names
+        secret_names = [
+            "thoth/dev/api-key",
+            "thoth/api-key",
+            "api-key",
+        ]
+        for secret_name in secret_names:
+            api_key = self.get_secret(secret_name)
+            if api_key:
+                return api_key
+        return None
 
 
 # Global instance for convenience

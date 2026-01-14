@@ -23,8 +23,8 @@ dependencies = [
 "rich>=13.0.0",
 "requests>=2.31.0",
 "apscheduler>=3.10.0",
-"google-cloud-storage>=2.10.0",
-"google-cloud-secret-manager>=2.16.0",
+"boto3>=1.28.0",
+"pyyaml>=6.0",
 "starlette>=0.37.0",
 "uvicorn[standard]>=0.27.0",
 "sse-starlette>=1.6.0",
@@ -67,6 +67,7 @@ dev = [
   "mypy>=1.0.0",
   "pytest>=7.0.0",
   "pytest-cov>=4.0.0",
+  "moto>=4.0.0",  # AWS service mocking for tests
   "bandit>=1.7.0",
   "pre-commit>=3.0.0",
   "sphinx>=5.0.0",
@@ -90,6 +91,7 @@ all = [
   "mypy>=1.0.0",
   "pytest>=7.0.0",
   "pytest-cov>=4.0.0",
+  "moto>=4.0.0",  # AWS service mocking for tests
   "bandit>=1.7.0",
   "pre-commit>=3.0.0",
   "sphinx>=5.0.0",
@@ -154,6 +156,7 @@ dependencies = [
   # Testing
   "pytest",
   "coverage[toml]>=6.5",
+  "moto>=4.0.0",  # AWS service mocking for tests
   # Security
   "bandit",
 ]
@@ -210,6 +213,9 @@ dependencies = [
     # Core dependencies
     "pytest",
     "pytest-cov",
+    "pytest-asyncio>=0.21.0",  # Async test support
+    # AWS mocking for tests
+    "moto>=4.0.0",
 ]
 
 # Keep test environment for backwards compatibility
@@ -472,3 +478,15 @@ warn_return_any = false
 [tool.bandit]
 exclude_dirs = ["tests", "docs"]
 skips = ["B101"]  # Skip assert_used test
+
+# Pytest configuration
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+markers = [
+    "asyncio: marks tests as async (deselect with '-m \"not asyncio\"')",
+]
+filterwarnings = [
+    "ignore::pydantic.warnings.PydanticDeprecatedSince211",  # Suppress Pydantic deprecation warnings from dependencies
+    "ignore::RuntimeWarning",  # Suppress coroutine warnings from test mocks
+    "ignore:coroutine.*was never awaited:RuntimeWarning",  # Suppress specific coroutine warnings
+]
