@@ -10,7 +10,7 @@ import time
 
 import pytest
 
-from thoth.ingestion.vector_store import VectorStore
+from thoth.shared.vector_store import VectorStore
 
 # Skip all tests if GCS credentials not available
 pytestmark = pytest.mark.skipif(
@@ -30,7 +30,7 @@ class TestGCSIntegration:
     @pytest.fixture
     def test_project_id(self):
         """GCP project ID for testing."""
-        return os.getenv("GCP_PROJECT_ID", "thoth-483015")
+        return os.getenv("GCP_PROJECT_ID", "thoth-dev-485501")
 
     @pytest.fixture
     def vector_store_with_gcs(self, test_bucket_name, test_project_id):

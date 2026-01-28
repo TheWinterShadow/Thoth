@@ -239,8 +239,8 @@ cd infra
 terraform import google_storage_bucket.thoth_bucket thoth-storage-bucket
 
 # Import secrets (if needed)
-terraform import google_secret_manager_secret.gitlab_token projects/thoth-483015/secrets/gitlab-token
-terraform import google_secret_manager_secret.gitlab_url projects/thoth-483015/secrets/gitlab-url
+terraform import google_secret_manager_secret.gitlab_token projects/thoth-dev-485501/secrets/gitlab-token
+terraform import google_secret_manager_secret.gitlab_url projects/thoth-dev-485501/secrets/gitlab-url
 
 # Verify state
 terraform state list

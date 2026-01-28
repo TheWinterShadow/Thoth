@@ -118,7 +118,7 @@ from thoth.ingestion.vector_store import VectorStore
 
 store = VectorStore(
     gcs_bucket_name="thoth-storage-bucket",
-    gcs_project_id="thoth-483015"
+    gcs_project_id="thoth-dev-485501"
 )
 
 backup_name = store.backup_to_gcs()
@@ -254,7 +254,7 @@ To deploy:
 1. **Configure GCP credentials**:
    ```bash
    gcloud auth login
-   gcloud config set project thoth-483015
+   gcloud config set project thoth-dev-485501
    ```
 
 2. **Run deployment**:

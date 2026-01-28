@@ -1,0 +1,25 @@
+# Example terraform.tfvars file for Thoth MCP Server
+# Copy this file to terraform.tfvars and update with your values
+
+# GCP Configuration (REQUIRED)
+project_id      = "your-gcp-project-id"
+region          = "us-central1"
+environment     = "dev"
+
+# Container Image (REQUIRED)
+# Build and push your container to GCR or Artifact Registry first
+# Example: gcr.io/your-project-id/thoth-mcp:latest
+container_image = "gcr.io/your-project-id/thoth-mcp:latest"
+
+# GitLab Configuration (OPTIONAL - can also be set via Secret Manager UI)
+# gitlab_token = "your-gitlab-personal-access-token"
+# gitlab_url   = "https://gitlab.com"
+
+# Application Configuration
+log_level = "INFO"
+
+# Cloud Run Configuration
+cloud_run_cpu    = "2"
+cloud_run_memory = "2Gi"
+min_instances    = 0
+max_instances    = 3

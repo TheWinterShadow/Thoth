@@ -10,14 +10,16 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import json
 import logging
+import os
 from pathlib import Path
 import shutil
 from typing import Any
 
 from thoth.ingestion.chunker import Chunk, MarkdownChunker
-from thoth.ingestion.embedder import Embedder
+from thoth.ingestion.gcs_repo_sync import GCSRepoSync
 from thoth.ingestion.repo_manager import HandbookRepoManager
-from thoth.ingestion.vector_store import VectorStore
+from thoth.shared.embedder import Embedder
+from thoth.shared.vector_store import VectorStore
 
 logger = logging.getLogger(__name__)
 
@@ -122,13 +124,51 @@ class IngestionPipeline:
         self.repo_manager = repo_manager or HandbookRepoManager()
         self.chunker = chunker or MarkdownChunker()
         self.embedder = embedder or Embedder()
-        self.vector_store = vector_store or VectorStore()
+
+        # Initialize GCS repo sync if in Cloud Run environment
+        self.gcs_repo_sync = None
+        gcs_bucket = os.getenv("GCS_BUCKET_NAME")
+        gcs_project = os.getenv("GCP_PROJECT_ID")
+
+        if gcs_bucket and gcs_project:
+            # Cloud Run: use GCS for repository storage
+            logger.info("Cloud Run detected - using GCS for repository sync")
+            repo_url = os.getenv("GITLAB_BASE_URL", "https://gitlab.com") + "/gitlab-com/content-sites/handbook.git"
+            self.gcs_repo_sync = GCSRepoSync(
+                bucket_name=gcs_bucket,
+                repo_url=repo_url,
+                gcs_prefix="handbook",
+                local_path=Path("/tmp/handbook"),  # nosec B108 - Cloud Run requires /tmp
+            )
+
+        # Auto-configure vector store for Cloud Run environment
+        if vector_store is None:
+            if gcs_bucket and gcs_project:
+                # Cloud Run: use /tmp for local cache and sync with GCS
+                logger.info(f"Cloud Run detected - using GCS bucket: {gcs_bucket}")
+                self.vector_store = VectorStore(
+                    persist_directory="/tmp/chroma_db",  # nosec B108 - Cloud Run requires /tmp
+                    gcs_bucket_name=gcs_bucket,
+                    gcs_project_id=gcs_project,
+                )
+            else:
+                # Local: use default chroma_db directory
+                self.vector_store = VectorStore()
+        else:
+            self.vector_store = vector_store
 
         self.state_file = state_file or (self.repo_manager.clone_path.parent / DEFAULT_STATE_FILE)
         self.batch_size = batch_size
         self.logger = logger_instance or logger
 
         self.state = self._load_state()
+
+    @property
+    def effective_repo_path(self) -> Path:
+        """Get the effective repository path (GCS local path or repo_manager clone path)."""
+        if self.gcs_repo_sync:
+            return self.gcs_repo_sync.local_path
+        return self.repo_manager.clone_path
 
     def _load_state(self) -> PipelineState:
         """Load pipeline state from disk.
@@ -180,6 +220,115 @@ class IngestionPipeline:
         self.logger.info("Found %d markdown files", len(markdown_files))
         return markdown_files
 
+    def get_file_list(self) -> list[str]:
+        """Get list of all markdown files for batch processing.
+
+        Returns:
+            List of file paths relative to repo root
+        """
+        # Use GCS sync if in Cloud Run environment
+        if self.gcs_repo_sync:
+            self.logger.info("Using GCS repository sync")
+            if not self.gcs_repo_sync.is_synced():
+                self.logger.info("Syncing repository from GCS to local...")
+                result = self.gcs_repo_sync.sync_to_local()
+                self.logger.info("Sync result: %s", result)
+            else:
+                self.logger.info("Repository already synced locally")
+
+            repo_path = self.gcs_repo_sync.get_local_path()
+        else:
+            # Local environment: use traditional git clone
+            clone_path = self.repo_manager.clone_path
+            self.logger.info("Checking if repository exists at: %s", clone_path)
+            if not clone_path.exists():
+                self.logger.info("Repository not found, cloning...")
+                try:
+                    self.repo_manager.clone_handbook()
+                    self.logger.info("Repository cloned successfully to: %s", clone_path)
+                except Exception:
+                    self.logger.exception("Failed to clone repository")
+                    raise
+            else:
+                self.logger.info("Repository already exists at: %s", clone_path)
+
+            repo_path = self.repo_manager.clone_path
+
+        # Discover files
+        markdown_files = self._discover_markdown_files(repo_path)
+
+        # Convert to relative paths
+        return [str(f.relative_to(repo_path)) for f in markdown_files]
+
+    def process_file_batch(
+        self,
+        start_index: int,
+        end_index: int,
+        file_list: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Process a specific batch of files by index range.
+
+        Args:
+            start_index: Starting index (inclusive)
+            end_index: Ending index (exclusive)
+            file_list: Optional pre-computed file list. If None, discovers files.
+
+        Returns:
+            Statistics dictionary with processed/failed counts
+        """
+        self.logger.info("Processing batch %d-%d of files", start_index, end_index)
+
+        # Get file list if not provided
+        if file_list is None:
+            file_list = self.get_file_list()
+
+        # Validate indices
+        if start_index < 0 or end_index > len(file_list) or start_index >= end_index:
+            msg = f"Invalid batch range: {start_index}-{end_index} for {len(file_list)} files"
+            raise ValueError(msg)
+
+        # Get batch slice
+        batch_files = file_list[start_index:end_index]
+
+        # Determine repo path (GCS sync or local clone)
+        if self.gcs_repo_sync:
+            # Ensure synced before processing
+            if not self.gcs_repo_sync.is_synced():
+                self.gcs_repo_sync.sync_to_local()
+            repo_path = self.gcs_repo_sync.get_local_path()
+        else:
+            repo_path = self.repo_manager.clone_path
+
+        # Convert to Path objects
+        file_paths = [repo_path / f for f in batch_files]
+
+        # Process the batch
+        start_time = datetime.now(timezone.utc)
+        successful, failed = self._process_batch(file_paths)
+        end_time = datetime.now(timezone.utc)
+
+        duration = (end_time - start_time).total_seconds()
+
+        stats = {
+            "start_index": start_index,
+            "end_index": end_index,
+            "total_files": len(batch_files),
+            "successful": successful,
+            "failed": failed,
+            "duration_seconds": duration,
+        }
+
+        self.logger.info(
+            "Batch %d-%d complete: %d successful, %d failed in %.2fs",
+            start_index,
+            end_index,
+            successful,
+            failed,
+            duration,
+        )
+
+        return stats
+
     def _process_file(self, file_path: Path) -> list[Chunk]:
         """Process a single markdown file into chunks.
 
@@ -222,7 +371,7 @@ class IngestionPipeline:
 
         for i, file_path in enumerate(files):
             # Skip if already processed
-            file_str = str(file_path.relative_to(self.repo_manager.clone_path))
+            file_str = str(file_path.relative_to(self.effective_repo_path))
             if file_str in self.state.processed_files:
                 self.logger.debug("Skipping already processed file: %s", file_str)
                 successful += 1
@@ -242,6 +391,24 @@ class IngestionPipeline:
                 documents = [chunk.content for chunk in chunks]
                 metadatas = [chunk.metadata.to_dict() for chunk in chunks]
                 ids = [chunk.metadata.chunk_id for chunk in chunks]
+
+                # Sanitize metadatas to ensure ChromaDB compatibility
+                # Convert any list values to comma-separated strings
+                def sanitize_metadata(meta: dict[str, Any]) -> dict[str, Any]:
+                    """Ensure all metadata values are ChromaDB-compatible (str, int, float, bool)."""
+                    sanitized: dict[str, Any] = {}
+                    for key, value in meta.items():
+                        if isinstance(value, list):
+                            sanitized[key] = ", ".join(str(v) for v in value)
+                        elif isinstance(value, (str, int, float, bool)):
+                            sanitized[key] = value
+                        elif value is None:
+                            sanitized[key] = ""
+                        else:
+                            sanitized[key] = str(value)
+                    return sanitized
+
+                metadatas = [sanitize_metadata(m) for m in metadatas]
 
                 # Generate embeddings and store
                 embeddings = self.embedder.embed(documents, show_progress=False)
@@ -448,7 +615,7 @@ class IngestionPipeline:
             if progress_callback:
                 progress_callback(0, 100, "Cloning/updating repository...")
 
-            if not self.repo_manager.clone_path.exists() or force_reclone:
+            if not self.repo_manager.is_valid_repo() or force_reclone:
                 self.logger.info("Cloning repository...")
                 self.repo_manager.clone_handbook(force=force_reclone)
             else:

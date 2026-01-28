@@ -29,7 +29,7 @@ This guide covers deploying the Thoth MCP Server to Google Cloud Run.
    gcloud auth login
    
    # Set default project
-   gcloud config set project thoth-483015
+   gcloud config set project thoth-dev-485501
    
    # Enable Docker authentication
    gcloud auth configure-docker
@@ -71,9 +71,9 @@ terraform init
 
 # Preview changes
 terraform plan \
-  -var="project_id=thoth-483015" \
+  -var="project_id=thoth-dev-485501" \
   -var="region=us-central1" \
-  -var="container_image=gcr.io/thoth-483015/thoth-mcp:latest"
+  -var="container_image=gcr.io/thoth-dev-485501/thoth-mcp:latest"
 
 # Apply configuration
 terraform apply
@@ -87,12 +87,12 @@ terraform output service_url
 ```bash
 # Build and push image
 docker build -t thoth-mcp:latest .
-docker tag thoth-mcp:latest gcr.io/thoth-483015/thoth-mcp:latest
-docker push gcr.io/thoth-483015/thoth-mcp:latest
+docker tag thoth-mcp:latest gcr.io/thoth-dev-485501/thoth-mcp:latest
+docker push gcr.io/thoth-dev-485501/thoth-mcp:latest
 
 # Deploy to Cloud Run
 gcloud run deploy thoth-mcp-server \
-  --image=gcr.io/thoth-483015/thoth-mcp:latest \
+  --image=gcr.io/thoth-dev-485501/thoth-mcp:latest \
   --platform=managed \
   --region=us-central1 \
   --allow-unauthenticated \
@@ -101,7 +101,7 @@ gcloud run deploy thoth-mcp-server \
   --timeout=300 \
   --min-instances=0 \
   --max-instances=3 \
-  --set-env-vars="PYTHONUNBUFFERED=1,GCP_PROJECT_ID=thoth-483015,GCS_BUCKET_NAME=thoth-storage-bucket,LOG_LEVEL=INFO"
+  --set-env-vars="PYTHONUNBUFFERED=1,GCP_PROJECT_ID=thoth-dev-485501,GCS_BUCKET_NAME=thoth-storage-bucket,LOG_LEVEL=INFO"
 ```
 
 ## Configuration
@@ -218,7 +218,7 @@ from thoth.ingestion.vector_store import VectorStore
 # Initialize with GCS
 store = VectorStore(
     gcs_bucket_name="thoth-storage-bucket",
-    gcs_project_id="thoth-483015"
+    gcs_project_id="thoth-dev-485501"
 )
 
 # Create backup
@@ -277,9 +277,9 @@ curl $(gcloud run services describe thoth-mcp-server --region=us-central1 --form
 gsutil ls gs://thoth-storage-bucket/
 
 # Check permissions
-gcloud projects get-iam-policy thoth-483015 \
+gcloud projects get-iam-policy thoth-dev-485501 \
   --flatten="bindings[].members" \
-  --filter="bindings.members:serviceAccount:thoth-mcp-sa@thoth-483015.iam.gserviceaccount.com"
+  --filter="bindings.members:serviceAccount:thoth-mcp-sa@thoth-dev-485501.iam.gserviceaccount.com"
 
 # Test GCS sync
 gcloud run services execute thoth-mcp-server \
@@ -309,13 +309,13 @@ To reduce cold starts:
 ```bash
 # Build new image with tag
 docker build -t thoth-mcp:v1.1.0 .
-docker tag thoth-mcp:v1.1.0 gcr.io/thoth-483015/thoth-mcp:v1.1.0
-docker push gcr.io/thoth-483015/thoth-mcp:v1.1.0
+docker tag thoth-mcp:v1.1.0 gcr.io/thoth-dev-485501/thoth-mcp:v1.1.0
+docker push gcr.io/thoth-dev-485501/thoth-mcp:v1.1.0
 
 # Update service
 gcloud run services update thoth-mcp-server \
   --region=us-central1 \
-  --image=gcr.io/thoth-483015/thoth-mcp:v1.1.0
+  --image=gcr.io/thoth-dev-485501/thoth-mcp:v1.1.0
 ```
 
 ### Rollback
@@ -368,7 +368,7 @@ echo -n "your-secret-value" | gcloud secrets create gitlab-token --data-file=-
 
 # Grant access to service account
 gcloud secrets add-iam-policy-binding gitlab-token \
-  --member="serviceAccount:thoth-mcp-sa@thoth-483015.iam.gserviceaccount.com" \
+  --member="serviceAccount:thoth-mcp-sa@thoth-dev-485501.iam.gserviceaccount.com" \
   --role="roles/secretmanager.secretAccessor"
 
 # Update Cloud Run to use secret
@@ -410,21 +410,21 @@ gcloud iam service-accounts create github-actions \
   --display-name="GitHub Actions Deployment"
 
 # 2. Grant necessary roles
-gcloud projects add-iam-policy-binding thoth-483015 \
-  --member="serviceAccount:github-actions@thoth-483015.iam.gserviceaccount.com" \
+gcloud projects add-iam-policy-binding thoth-dev-485501 \
+  --member="serviceAccount:github-actions@thoth-dev-485501.iam.gserviceaccount.com" \
   --role="roles/run.admin"
 
-gcloud projects add-iam-policy-binding thoth-483015 \
-  --member="serviceAccount:github-actions@thoth-483015.iam.gserviceaccount.com" \
+gcloud projects add-iam-policy-binding thoth-dev-485501 \
+  --member="serviceAccount:github-actions@thoth-dev-485501.iam.gserviceaccount.com" \
   --role="roles/storage.admin"
 
-gcloud projects add-iam-policy-binding thoth-483015 \
-  --member="serviceAccount:github-actions@thoth-483015.iam.gserviceaccount.com" \
+gcloud projects add-iam-policy-binding thoth-dev-485501 \
+  --member="serviceAccount:github-actions@thoth-dev-485501.iam.gserviceaccount.com" \
   --role="roles/iam.serviceAccountUser"
 
 # 3. Create and download key
 gcloud iam service-accounts keys create github-actions-key.json \
-  --iam-account=github-actions@thoth-483015.iam.gserviceaccount.com
+  --iam-account=github-actions@thoth-dev-485501.iam.gserviceaccount.com
 
 # 4. Add to GitHub Secrets
 # Copy contents of github-actions-key.json to GCP_SA_KEY secret in repository settings

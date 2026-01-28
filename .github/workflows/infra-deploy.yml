@@ -5,9 +5,10 @@ on:
     branches:
       - main
     paths:
-      - "infra/**"
+      - "terraform/**"
       - "thoth/**"
-      - "Dockerfile"
+      - "Dockerfile.mcp"
+      - "Dockerfile.ingestion"
       - ".github/workflows/infra-deploy.yml"
   workflow_dispatch:
     inputs:
@@ -25,15 +26,19 @@ permissions:
   id-token: write
 
 env:
-  TF_WORKING_DIR: ./infra
-  GCP_PROJECT_ID: thoth-483015
+  TF_WORKING_DIR: ./terraform
+  GCP_PROJECT_ID: thoth-dev-485501
   GCP_REGION: us-central1
-  SERVICE_NAME: thoth-mcp-server
-  IMAGE_NAME: thoth-mcp
+  MCP_SERVICE_NAME: thoth-mcp-server
+  INGESTION_SERVICE_NAME: thoth-ingestion-worker
+  MCP_IMAGE_NAME: thoth-mcp
+  INGESTION_IMAGE_NAME: thoth-ingestion
+  TF_CLOUD_ORGANIZATION: TheWinterShadow
+  TF_WORKSPACE: thoth-mcp-gcp
 
 jobs:
-  build_image:
-    name: "Build and Push Docker Image"
+  build_mcp_image:
+    name: "Build and Push MCP Server Image"
     runs-on: ubuntu-latest
     if: github.event.inputs.skip_cloud_run != 'true'
     outputs:
@@ -56,43 +61,35 @@ jobs:
       - name: Configure Docker for GCR
         run: gcloud auth configure-docker
 
-      - name: Build Docker Image
+      - name: Build MCP Docker Image
         run: |
           docker build \
             --build-arg BUILDKIT_INLINE_CACHE=1 \
-            --cache-from gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}:latest \
-            -t gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
-            -t gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}:latest \
+            --cache-from gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.MCP_IMAGE_NAME }}:latest \
+            -t gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.MCP_IMAGE_NAME }}:${{ github.sha }} \
+            -t gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.MCP_IMAGE_NAME }}:latest \
+            -f Dockerfile.mcp \
             .
 
-      - name: Push Docker Image
+      - name: Push MCP Docker Image
         run: |
-          docker push gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-          docker push gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}:latest
+          docker push gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.MCP_IMAGE_NAME }}:${{ github.sha }}
+          docker push gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.MCP_IMAGE_NAME }}:latest
 
       - name: Set Output
         id: image
         run: echo "tag=${{ github.sha }}" >> $GITHUB_OUTPUT
 
-  terraform:
-    name: "Provision Infrastructure"
+  build_ingestion_image:
+    name: "Build and Push Ingestion Worker Image"
     runs-on: ubuntu-latest
-    needs: build_image
-    if: |
-      always() &&
-      (needs.build_image.result == 'success' || needs.build_image.result == 'skipped') &&
-      github.event.inputs.skip_terraform != 'true'
+    if: github.event.inputs.skip_cloud_run != 'true'
     outputs:
-      bucket_name: ${{ steps.outputs.outputs.bucket_name }}
+      image_tag: ${{ steps.image.outputs.tag }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.6.0
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
@@ -101,32 +98,58 @@ jobs:
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
 
-      - name: Bootstrap Terraform State Bucket
+      - name: Configure Docker for GCR
+        run: gcloud auth configure-docker
+
+      - name: Build Ingestion Docker Image
         run: |
-          # Check if state bucket exists
-          if ! gsutil ls -b gs://thoth-terraform-state &>/dev/null; then
-            echo "State bucket doesn't exist. Running Terraform bootstrap..."
-            
-            # Run bootstrap from separate directory to avoid validation issues
-            cd bootstrap
-            
-            # Initialize and apply bootstrap
-            terraform init
-            terraform apply -auto-approve -input=false \
-              -var="project_id=${{ env.GCP_PROJECT_ID }}" \
-              -var="region=${{ env.GCP_REGION }}"
-            
-            cd ..
-            echo "Bootstrap complete. State bucket created."
-          else
-            echo "State bucket already exists. Skipping bootstrap."
-          fi
-        working-directory: ${{ env.TF_WORKING_DIR }}
+          docker build \
+            --build-arg BUILDKIT_INLINE_CACHE=1 \
+            --cache-from gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.INGESTION_IMAGE_NAME }}:latest \
+            -t gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.INGESTION_IMAGE_NAME }}:${{ github.sha }} \
+            -t gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.INGESTION_IMAGE_NAME }}:latest \
+            -f Dockerfile.ingestion \
+            .
+
+      - name: Push Ingestion Docker Image
+        run: |
+          docker push gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.INGESTION_IMAGE_NAME }}:${{ github.sha }}
+          docker push gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.INGESTION_IMAGE_NAME }}:latest
+
+      - name: Set Output
+        id: image
+        run: echo "tag=${{ github.sha }}" >> $GITHUB_OUTPUT
+
+  terraform:
+    name: "Provision Infrastructure"
+    runs-on: ubuntu-latest
+    needs: [build_mcp_image, build_ingestion_image]
+    if: |
+      always() &&
+      (needs.build_mcp_image.result == 'success' || needs.build_mcp_image.result == 'skipped') &&
+      (needs.build_ingestion_image.result == 'success' || needs.build_ingestion_image.result == 'skipped') &&
+      github.event.inputs.skip_terraform != 'true'
+    outputs:
+      bucket_name: ${{ steps.outputs.outputs.bucket_name }}
+      mcp_service_url: ${{ steps.outputs.outputs.mcp_service_url }}
+      ingestion_worker_url: ${{ steps.outputs.outputs.ingestion_worker_url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+          terraform_version: 1.5.7
 
       - name: Terraform Init
         id: init
-        run: terraform init -reconfigure
+        run: terraform init
         working-directory: ${{ env.TF_WORKING_DIR }}
 
       - name: Terraform Format Check
@@ -140,138 +163,48 @@ jobs:
         run: terraform validate
         working-directory: ${{ env.TF_WORKING_DIR }}
 
-      - name: Import Existing Resources
-        run: |
-          # Import existing bucket if it exists and isn't in state
-          if gsutil ls -b gs://thoth-storage-bucket &>/dev/null; then
-            if ! terraform state show google_storage_bucket.thoth_bucket &>/dev/null; then
-              echo "Importing existing bucket into Terraform state..."
-              terraform import -var="project_id=${{ env.GCP_PROJECT_ID }}" \
-                -var="region=${{ env.GCP_REGION }}" \
-                google_storage_bucket.thoth_bucket thoth-storage-bucket || echo "Import failed or resource already managed"
-            else
-              echo "Bucket already in Terraform state"
-            fi
-          else
-            echo "Bucket doesn't exist yet, will be created"
-          fi
-
-          # Import existing service account if it exists and isn't in state
-          if gcloud iam service-accounts describe thoth-mcp-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com &>/dev/null; then
-            if ! terraform state show google_service_account.thoth_mcp &>/dev/null; then
-              echo "Importing existing service account into Terraform state..."
-              terraform import -var="project_id=${{ env.GCP_PROJECT_ID }}" \
-                -var="region=${{ env.GCP_REGION }}" \
-                google_service_account.thoth_mcp projects/${{ env.GCP_PROJECT_ID }}/serviceAccounts/thoth-mcp-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com || echo "Import failed or resource already managed"
-            else
-              echo "Service account already in Terraform state"
-            fi
-          else
-            echo "Service account doesn't exist yet, will be created"
-          fi
-
-          # Import scheduler service account if it exists
-          if gcloud iam service-accounts describe thoth-scheduler@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com &>/dev/null; then
-            if ! terraform state show google_service_account.scheduler &>/dev/null; then
-              echo "Importing existing scheduler service account into Terraform state..."
-              terraform import -var="project_id=${{ env.GCP_PROJECT_ID }}" \
-                -var="region=${{ env.GCP_REGION }}" \
-                google_service_account.scheduler projects/${{ env.GCP_PROJECT_ID }}/serviceAccounts/thoth-scheduler@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com || echo "Import failed or resource already managed"
-            else
-              echo "Scheduler service account already in Terraform state"
-            fi
-          else
-            echo "Scheduler service account doesn't exist yet, will be created"
-          fi
-
-          # Import existing secrets if they exist
-          for secret in gitlab-token gitlab-url google-application-credentials; do
-            if gcloud secrets describe $secret --project=${{ env.GCP_PROJECT_ID }} &>/dev/null; then
-              # Map secret ID to Terraform resource name
-              case $secret in
-                gitlab-token) resource="google_secret_manager_secret.gitlab_token" ;;
-                gitlab-url) resource="google_secret_manager_secret.gitlab_url" ;;
-                google-application-credentials) resource="google_secret_manager_secret.google_credentials" ;;
-              esac
-              
-              if ! terraform state show $resource &>/dev/null; then
-                echo "Importing existing secret $secret into Terraform state..."
-                terraform import -var="project_id=${{ env.GCP_PROJECT_ID }}" \
-                  -var="region=${{ env.GCP_REGION }}" \
-                  $resource projects/${{ env.GCP_PROJECT_ID }}/secrets/$secret || echo "Import failed or resource already managed"
-              else
-                echo "Secret $secret already in Terraform state"
-              fi
-            else
-              echo "Secret $secret doesn't exist yet, will be created"
-            fi
-          done
-
-          # Import existing Cloud Run service if it exists
-          if gcloud run services describe ${{ env.SERVICE_NAME }} --region=${{ env.GCP_REGION }} &>/dev/null; then
-            if ! terraform state show google_cloud_run_v2_service.thoth_mcp &>/dev/null; then
-              echo "Importing existing Cloud Run service into Terraform state..."
-              terraform import -var="project_id=${{ env.GCP_PROJECT_ID }}" \
-                -var="region=${{ env.GCP_REGION }}" \
-                google_cloud_run_v2_service.thoth_mcp projects/${{ env.GCP_PROJECT_ID }}/locations/${{ env.GCP_REGION }}/services/${{ env.SERVICE_NAME }} || echo "Import failed or resource already managed"
-            else
-              echo "Cloud Run service already in Terraform state"
-            fi
-          else
-            echo "Cloud Run service doesn't exist yet, will be created"
-          fi
-        working-directory: ${{ env.TF_WORKING_DIR }}
-        continue-on-error: true
-
       - name: Terraform Plan
         id: plan
         run: |
-          terraform plan -no-color -input=false -out=tfplan \
-            -var="project_id=${{ env.GCP_PROJECT_ID }}" \
-            -var="region=${{ env.GCP_REGION }}"
+          terraform plan -no-color -input=false -var-file=environments/dev.tfvars
           echo "## Terraform Plan" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`terraform" >> $GITHUB_STEP_SUMMARY
-          terraform show -no-color tfplan >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "Plan URL: https://app.terraform.io/app/${{ env.TF_CLOUD_ORGANIZATION }}/${{ env.TF_WORKSPACE }}/runs" >> $GITHUB_STEP_SUMMARY
         working-directory: ${{ env.TF_WORKING_DIR }}
-        env:
-          TF_VAR_gitlab_token: "" # Will be set in Secret Manager post-deployment
-          TF_VAR_gitlab_url: "" # Will be set in Secret Manager post-deployment
 
       - name: Terraform Apply
         id: apply
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-        run: terraform apply -auto-approve -input=false tfplan
+        run: terraform apply -auto-approve -var-file=environments/dev.tfvars
         working-directory: ${{ env.TF_WORKING_DIR }}
 
       - name: Get Terraform Outputs
         id: outputs
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         run: |
-          BUCKET_NAME=$(terraform output -raw bucket_name 2>/dev/null || echo "thoth-storage-bucket")
+          BUCKET_NAME=$(terraform output -raw storage_bucket_name 2>/dev/null || echo "thoth-dev-485501-thoth-storage")
+          MCP_URL=$(terraform output -raw mcp_service_url 2>/dev/null || echo "")
+          INGESTION_URL=$(terraform output -raw ingestion_worker_url 2>/dev/null || echo "")
           echo "bucket_name=${BUCKET_NAME}" >> $GITHUB_OUTPUT
-
-          # Display secret setup instructions
-          echo "## 📝 Post-Deployment Steps" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Update Secrets in Secret Manager" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-          echo "# Update GitLab token" >> $GITHUB_STEP_SUMMARY
-          echo "echo -n 'YOUR_GITLAB_TOKEN' | gcloud secrets versions add gitlab-token --data-file=- --project=${{ env.GCP_PROJECT_ID }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "# Test scheduler jobs" >> $GITHUB_STEP_SUMMARY
-          echo "gcloud scheduler jobs run thoth-daily-sync --location=${{ env.GCP_REGION }} --project=${{ env.GCP_PROJECT_ID }}" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "mcp_service_url=${MCP_URL}" >> $GITHUB_OUTPUT
+          echo "ingestion_worker_url=${INGESTION_URL}" >> $GITHUB_OUTPUT
+          echo "## 📝 Terraform Cloud Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "View run details: https://app.terraform.io/app/${{ env.TF_CLOUD_ORGANIZATION }}/${{ env.TF_WORKSPACE }}" >> $GITHUB_STEP_SUMMARY
+          echo "- MCP Service URL: ${MCP_URL}" >> $GITHUB_STEP_SUMMARY
+          echo "- Ingestion Worker URL: ${INGESTION_URL}" >> $GITHUB_STEP_SUMMARY
         working-directory: ${{ env.TF_WORKING_DIR }}
 
-  deploy_cloud_run:
-    name: "Deploy to Cloud Run"
+  # Update Cloud Run images after Terraform deployment
+  # Note: Terraform manages all Cloud Run configuration (env vars, secrets, IAM).
+  # This job ONLY updates the container image, preserving Terraform-managed settings.
+  update_cloud_run_images:
+    name: "Update Cloud Run Images"
     runs-on: ubuntu-latest
-    needs: [build_image, terraform]
+    needs: [build_mcp_image, build_ingestion_image, terraform]
     if: |
-      always() && 
+      always() &&
       (needs.terraform.result == 'success' || needs.terraform.result == 'skipped') &&
-      (needs.build_image.result == 'success' || needs.build_image.result == 'skipped') &&
+      (needs.build_mcp_image.result == 'success' || needs.build_mcp_image.result == 'skipped') &&
+      (needs.build_ingestion_image.result == 'success' || needs.build_ingestion_image.result == 'skipped') &&
       github.event.inputs.skip_cloud_run != 'true'
 
     steps:
@@ -288,58 +221,75 @@ jobs:
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
 
-      - name: Deploy to Cloud Run
-        id: deploy
+      # Only update the image - preserves all Terraform-managed configuration
+      - name: Update MCP Server Image
+        id: update_mcp
         run: |
-          gcloud run deploy ${{ env.SERVICE_NAME }} \
-            --image gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
-            --region ${{ env.GCP_REGION }} \
-            --platform managed \
-            --allow-unauthenticated \
-            --set-env-vars "GCS_BUCKET_NAME=${{ needs.terraform.outputs.bucket_name || 'thoth-storage-bucket' }}" \
-            --set-env-vars "GCP_PROJECT_ID=${{ env.GCP_PROJECT_ID }}" \
-            --memory 2Gi \
-            --cpu 2 \
-            --timeout 300 \
-            --min-instances 0 \
-            --max-instances 10 \
-            --concurrency 80
+          gcloud run services update ${{ env.MCP_SERVICE_NAME }} \
+            --image gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.MCP_IMAGE_NAME }}:${{ github.sha }} \
+            --region ${{ env.GCP_REGION }}
 
-      - name: Get Service URL
-        id: url
+      - name: Update Ingestion Worker Image
+        id: update_ingestion
         run: |
-          SERVICE_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
+          gcloud run services update ${{ env.INGESTION_SERVICE_NAME }} \
+            --image gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.INGESTION_IMAGE_NAME }}:${{ github.sha }} \
+            --region ${{ env.GCP_REGION }}
+
+      - name: Get Service URLs
+        id: urls
+        run: |
+          MCP_URL=$(gcloud run services describe ${{ env.MCP_SERVICE_NAME }} \
             --region ${{ env.GCP_REGION }} \
             --format 'value(status.url)')
-          echo "service_url=$SERVICE_URL" >> $GITHUB_OUTPUT
+          INGESTION_URL=$(gcloud run services describe ${{ env.INGESTION_SERVICE_NAME }} \
+            --region ${{ env.GCP_REGION }} \
+            --format 'value(status.url)')
+          echo "mcp_url=$MCP_URL" >> $GITHUB_OUTPUT
+          echo "ingestion_url=$INGESTION_URL" >> $GITHUB_OUTPUT
           echo "## Deployment Successful! 🚀" >> $GITHUB_STEP_SUMMARY
-          echo "Service URL: $SERVICE_URL" >> $GITHUB_STEP_SUMMARY
+          echo "- **MCP Server URL**: $MCP_URL" >> $GITHUB_STEP_SUMMARY
+          echo "- **Ingestion Worker URL**: $INGESTION_URL" >> $GITHUB_STEP_SUMMARY
 
-      - name: Verify Deployment
+      - name: Verify MCP Server Deployment
         run: |
-          SERVICE_URL="${{ steps.url.outputs.service_url }}"
-          echo "Waiting for service to be ready..."
+          SERVICE_URL="${{ steps.urls.outputs.mcp_url }}"
+          echo "Waiting for MCP server to be ready..."
           sleep 10
 
-          # Check health endpoint
-          HEALTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${SERVICE_URL}/health" || echo "000")
+          # Health check requires authentication - use gcloud identity token
+          HEALTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer $(gcloud auth print-identity-token)" \
+            "${SERVICE_URL}/health" || echo "000")
 
           if [ "$HEALTH_STATUS" = "200" ]; then
-            echo "✅ Health check passed!"
-            echo "### Health Check: ✅ PASSED" >> $GITHUB_STEP_SUMMARY
+            echo "✅ MCP Server health check passed!"
+            echo "### MCP Server Health Check: ✅ PASSED" >> $GITHUB_STEP_SUMMARY
           else
-            echo "⚠️  Health check returned status: $HEALTH_STATUS"
-            echo "### Health Check: ⚠️  Status $HEALTH_STATUS" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️  MCP Server health check returned status: $HEALTH_STATUS"
+            echo "### MCP Server Health Check: ⚠️  Status $HEALTH_STATUS" >> $GITHUB_STEP_SUMMARY
           fi
 
-          # Get recent logs
-          echo "### Recent Logs" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=${{ env.SERVICE_NAME }}" \
-            --limit 20 --format "value(textPayload)" >> $GITHUB_STEP_SUMMARY || echo "No logs available yet"
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+      - name: Verify Ingestion Worker Deployment
+        run: |
+          SERVICE_URL="${{ steps.urls.outputs.ingestion_url }}"
+          echo "Waiting for ingestion worker to be ready..."
+          sleep 10
 
-      - name: Verify Secrets and Scheduler
+          # Health check requires authentication - use gcloud identity token
+          HEALTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer $(gcloud auth print-identity-token)" \
+            "${SERVICE_URL}/health" || echo "000")
+
+          if [ "$HEALTH_STATUS" = "200" ]; then
+            echo "✅ Ingestion Worker health check passed!"
+            echo "### Ingestion Worker Health Check: ✅ PASSED" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️  Ingestion Worker health check returned status: $HEALTH_STATUS"
+            echo "### Ingestion Worker Health Check: ⚠️  Status $HEALTH_STATUS" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Verify Infrastructure Components
         run: |
           echo "### Infrastructure Components" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -347,12 +297,12 @@ jobs:
           # Check secrets
           echo "#### Secrets (Secret Manager)" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          gcloud secrets list --project=${{ env.GCP_PROJECT_ID }} --filter="name~gitlab OR name~google-application" --format="table(name,createTime)" >> $GITHUB_STEP_SUMMARY || echo "No secrets found"
+          gcloud secrets list --project=${{ env.GCP_PROJECT_ID }} --filter="name~gitlab OR name~huggingface" --format="table(name,createTime)" >> $GITHUB_STEP_SUMMARY || echo "No secrets found"
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          # Check scheduler jobs
-          echo "#### Scheduler Jobs" >> $GITHUB_STEP_SUMMARY
+          # Check Cloud Tasks queues
+          echo "#### Cloud Tasks Queues" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          gcloud scheduler jobs list --location=${{ env.GCP_REGION }} --project=${{ env.GCP_PROJECT_ID }} --format="table(name,schedule,state)" >> $GITHUB_STEP_SUMMARY || echo "No scheduler jobs found"
+          gcloud tasks queues list --location=${{ env.GCP_REGION }} --project=${{ env.GCP_PROJECT_ID }} --format="table(name,rateLimits.maxConcurrentDispatches,state)" >> $GITHUB_STEP_SUMMARY || echo "No queues found"
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY

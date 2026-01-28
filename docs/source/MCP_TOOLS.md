@@ -211,7 +211,7 @@ To test the tools locally:
 
 To add a new tool to the server:
 
-1. **Update the `list_tools()` handler** in `thoth/mcp_server/server.py` to include your tool definition
+1. **Update the `list_tools()` handler** in `thoth/mcp/server/server.py` to include your tool definition
 
 2. **Add handling logic** in the `call_tool()` handler
 

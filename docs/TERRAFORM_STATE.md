@@ -94,7 +94,7 @@ terraform init -backend=false
 # Create state bucket
 terraform apply -auto-approve \
   -target=google_storage_bucket.terraform_state \
-  -var="project_id=thoth-483015" \
+  -var="project_id=thoth-dev-485501" \
   -var="region=us-central1"
 
 # Migrate to GCS backend
@@ -132,8 +132,8 @@ cd infra
 terraform import google_storage_bucket.thoth_bucket thoth-storage-bucket
 
 # Import other resources as needed
-terraform import google_secret_manager_secret.gitlab_token projects/thoth-483015/secrets/gitlab-token
-terraform import google_secret_manager_secret.gitlab_url projects/thoth-483015/secrets/gitlab-url
+terraform import google_secret_manager_secret.gitlab_token projects/thoth-dev-485501/secrets/gitlab-token
+terraform import google_secret_manager_secret.gitlab_url projects/thoth-dev-485501/secrets/gitlab-url
 ```
 
 ### Solution 3: Lifecycle Protection
@@ -258,8 +258,8 @@ terraform init -migrate-state -force-copy
 
 **Solution**: Ensure your service account has `roles/storage.objectAdmin`:
 ```bash
-gcloud projects add-iam-policy-binding thoth-483015 \
-  --member="serviceAccount:github-actions@thoth-483015.iam.gserviceaccount.com" \
+gcloud projects add-iam-policy-binding thoth-dev-485501 \
+  --member="serviceAccount:github-actions@thoth-dev-485501.iam.gserviceaccount.com" \
   --role="roles/storage.objectAdmin"
 ```
 

@@ -3,6 +3,9 @@
 auth.aws
 *.pem
 *.key
+auth/
+*-key.json
+terraform-key.json
 
 # Virtual environments
 .env/
@@ -68,3 +71,4 @@ override.tf.json
 handbook_vectors/
 *.ipynb
 benchmark_embeddings.py
+auth/

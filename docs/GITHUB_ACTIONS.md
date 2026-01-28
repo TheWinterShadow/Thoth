@@ -65,7 +65,7 @@ Automatically provisions GCP infrastructure including Secret Manager and Cloud S
 
 **Environment Variables**:
 ```yaml
-GCP_PROJECT_ID: thoth-483015
+GCP_PROJECT_ID: thoth-dev-485501
 GCP_REGION: us-central1
 SERVICE_NAME: thoth-mcp-server
 IMAGE_NAME: thoth-mcp
@@ -159,18 +159,18 @@ Service account key JSON with the following roles:
 # 1. Create service account
 gcloud iam service-accounts create github-actions \
   --display-name="GitHub Actions Deployment" \
-  --project=thoth-483015
+  --project=thoth-dev-485501
 
 # 2. Grant roles
 for role in run.admin storage.admin iam.serviceAccountUser artifactregistry.writer secretmanager.admin cloudscheduler.admin; do
-  gcloud projects add-iam-policy-binding thoth-483015 \
-    --member="serviceAccount:github-actions@thoth-483015.iam.gserviceaccount.com" \
+  gcloud projects add-iam-policy-binding thoth-dev-485501 \
+    --member="serviceAccount:github-actions@thoth-dev-485501.iam.gserviceaccount.com" \
     --role="roles/${role}"
 done
 
 # 3. Create key
 gcloud iam service-accounts keys create github-actions-key.json \
-  --iam-account=github-actions@thoth-483015.iam.gserviceaccount.com
+  --iam-account=github-actions@thoth-dev-485501.iam.gserviceaccount.com
 
 # 4. Add to GitHub Secrets
 # Copy contents of github-actions-key.json to GOOGLE_APPLICATION_CREDENTIALS secret
@@ -245,8 +245,8 @@ gh workflow run validate-infrastructure.yml
 **Problem**: Tests fail with "Secret not found" errors
 
 **Solution**:
-1. Verify secrets exist: `gcloud secrets list --project=thoth-483015`
-2. Check IAM permissions: `gcloud secrets get-iam-policy gitlab-token --project=thoth-483015`
+1. Verify secrets exist: `gcloud secrets list --project=thoth-dev-485501`
+2. Check IAM permissions: `gcloud secrets get-iam-policy gitlab-token --project=thoth-dev-485501`
 3. Ensure service account has `secretmanager.secretAccessor` role
 4. Run validation workflow to diagnose issues
 
@@ -263,7 +263,7 @@ pytest tests/utils/test_secrets.py
 **Problem**: Scheduled jobs not triggering
 
 **Solution**:
-1. Check job status: `gcloud scheduler jobs list --project=thoth-483015`
+1. Check job status: `gcloud scheduler jobs list --project=thoth-dev-485501`
 2. Verify job configuration: `gcloud scheduler jobs describe thoth-daily-sync --location=us-central1`
 3. Check service account permissions: Scheduler SA needs `roles/run.invoker`
 4. View job history: `gcloud scheduler jobs describe thoth-daily-sync --location=us-central1 | grep -A5 status`
@@ -302,10 +302,10 @@ gcloud run services logs read thoth-mcp-server --region=us-central1 --limit=50
 gcloud run services describe thoth-mcp-server --region=us-central1
 
 # List secrets
-gcloud secrets list --project=thoth-483015
+gcloud secrets list --project=thoth-dev-485501
 
 # Check scheduler jobs
-gcloud scheduler jobs list --project=thoth-483015 --location=us-central1
+gcloud scheduler jobs list --project=thoth-dev-485501 --location=us-central1
 
 # View recent logs
 gcloud logging read "resource.type=cloud_run_revision AND \
@@ -407,7 +407,7 @@ gcloud secrets create my-secret --data-file=secret.txt
 
 # Grant access to Cloud Run service account
 gcloud secrets add-iam-policy-binding my-secret \
-  --member="serviceAccount:thoth-mcp-sa@thoth-483015.iam.gserviceaccount.com" \
+  --member="serviceAccount:thoth-mcp-sa@thoth-dev-485501.iam.gserviceaccount.com" \
   --role="roles/secretmanager.secretAccessor"
 
 # Update workflow to use secret

@@ -79,7 +79,7 @@ class GitLabAPIClient:
         # Try to get token and base_url from Secret Manager or environment
         if token is None:
             try:
-                from thoth.utils.secrets import get_secret_manager  # noqa: PLC0415
+                from thoth.shared.utils.secrets import get_secret_manager  # noqa: PLC0415
 
                 secret_manager = get_secret_manager()
                 token = secret_manager.get_gitlab_token()
@@ -96,7 +96,7 @@ class GitLabAPIClient:
 
         if base_url == DEFAULT_BASE_URL:
             try:
-                from thoth.utils.secrets import get_secret_manager  # noqa: PLC0415
+                from thoth.shared.utils.secrets import get_secret_manager  # noqa: PLC0415
 
                 secret_manager = get_secret_manager()
                 custom_url = secret_manager.get_gitlab_url()

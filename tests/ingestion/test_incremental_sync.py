@@ -8,7 +8,7 @@ import pytest
 
 from thoth.ingestion.pipeline import IngestionPipeline
 from thoth.ingestion.repo_manager import HandbookRepoManager
-from thoth.ingestion.vector_store import VectorStore
+from thoth.shared.vector_store import VectorStore
 
 
 class TestIncrementalSync:

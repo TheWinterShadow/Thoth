@@ -45,6 +45,22 @@ class HandbookRepoManager:
         self.metadata_path = self.clone_path.parent / METADATA_FILE
         self.logger = logger or logging.getLogger(__name__)
 
+    def is_valid_repo(self) -> bool:
+        """Check if clone_path contains a valid git repository.
+
+        Returns:
+            True if valid repo exists, False otherwise
+        """
+        if not self.clone_path.exists():
+            return False
+        try:
+            repo = Repo(str(self.clone_path))
+            # Try to access head to verify it's a valid initialized repo
+            _ = repo.head
+            return True
+        except (InvalidGitRepositoryError, ValueError):
+            return False
+
     def clone_handbook(
         self,
         force: bool = False,
@@ -65,12 +81,14 @@ class HandbookRepoManager:
             RuntimeError: If repository exists and force=False
             GitCommandError: If cloning fails after all retries
         """
-        if self.clone_path.exists() and not force:
+        # Only raise error if a VALID repo exists and force=False
+        if self.is_valid_repo() and not force:
             msg = MSG_REPO_EXISTS.format(path=self.clone_path)
             raise RuntimeError(msg)
 
-        if force and self.clone_path.exists():
-            self.logger.info("Removing existing repository at %s", self.clone_path)
+        # Remove directory if it exists (whether valid repo or not)
+        if self.clone_path.exists():
+            self.logger.info("Removing existing directory at %s", self.clone_path)
             shutil.rmtree(self.clone_path)
 
         self.clone_path.parent.mkdir(parents=True, exist_ok=True)

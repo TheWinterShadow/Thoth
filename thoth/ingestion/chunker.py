@@ -52,13 +52,30 @@ class ChunkMetadata:
     overlap_with_next: bool = False
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert metadata to dictionary."""
-        return {
+        """Convert metadata to dictionary.
+
+        Ensures all values are ChromaDB-compatible types (str, int, float, bool).
+        Lists are converted to comma-separated strings.
+        """
+
+        def sanitize_value(value: Any) -> str | int | float | bool:
+            """Convert any value to ChromaDB-compatible type."""
+            if isinstance(value, (str, int, float, bool)):
+                return value
+            if isinstance(value, list):
+                # Convert lists to comma-separated strings
+                return ", ".join(str(v) for v in value)
+            if value is None:
+                return ""
+            # Convert anything else to string
+            return str(value)
+
+        raw_dict = {
             "chunk_id": self.chunk_id,
             "file_path": self.file_path,
             "chunk_index": self.chunk_index,
             "total_chunks": self.total_chunks,
-            "headers": self.headers,
+            "headers": ", ".join(self.headers) if self.headers else "",
             "start_line": self.start_line,
             "end_line": self.end_line,
             "token_count": self.token_count,
@@ -67,6 +84,9 @@ class ChunkMetadata:
             "overlap_with_previous": self.overlap_with_previous,
             "overlap_with_next": self.overlap_with_next,
         }
+
+        # Sanitize all values to ensure ChromaDB compatibility
+        return {k: sanitize_value(v) for k, v in raw_dict.items()}
 
 
 @dataclass

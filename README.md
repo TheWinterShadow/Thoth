@@ -90,7 +90,7 @@ vector_store_with_gcs = VectorStore(
     persist_directory="./chroma_db",
     collection_name="handbook_docs",
     gcs_bucket_name="thoth-storage-bucket",
-    gcs_project_id="thoth-483015"
+    gcs_project_id="thoth-dev-485501"
 )
 
 # Add documents - embeddings are automatically generated
@@ -172,24 +172,296 @@ print(f"Thoth v{thoth.__version__} - Ready to enhance your Python experience!")
 
 Thoth follows a modular architecture designed for extensibility and maintainability.
 
+### System Architecture Diagram
+
+```mermaid
+flowchart TB
+    subgraph External["External Services"]
+        GitLab["GitLab Handbook<br/>(Public Git Repo)"]
+        Claude["Claude AI Assistant<br/>(MCP Client)"]
+        HuggingFace["HuggingFace<br/>(Model Hub)"]
+    end
+
+    subgraph GCP["Google Cloud Platform"]
+        subgraph CloudRun["Cloud Run Service"]
+            HTTPWrapper["HTTP Wrapper<br/>(Uvicorn/Starlette)"]
+            MCPServer["MCP Server<br/>(ThothMCPServer)"]
+            Health["Health Checks<br/>(/health endpoint)"]
+        end
+
+        subgraph TaskQueue["Task Queue"]
+            CloudTasks["Cloud Tasks<br/>(thoth-ingestion-queue)"]
+        end
+
+        subgraph Storage["Storage Services"]
+            GCS["Cloud Storage<br/>(Vector DB Backups)"]
+        end
+
+        subgraph Secrets["Secret Manager"]
+            GitLabToken["gitlab-token"]
+            GitLabURL["gitlab-url"]
+            HFToken["huggingface-token"]
+        end
+
+        subgraph Observability["Observability"]
+            Logging["Cloud Logging"]
+            Monitoring["Cloud Monitoring"]
+        end
+
+        GCR["Container Registry<br/>(Docker Images)"]
+        ServiceAccount["Service Account<br/>(thoth-mcp-sa)"]
+    end
+
+    subgraph Ingestion["Ingestion Pipeline"]
+        RepoMgr["Repo Manager<br/>(Git Clone/Pull)"]
+        Chunker["Markdown Chunker<br/>(500-1000 tokens)"]
+        Embedder["Embedder<br/>(sentence-transformers)"]
+        VectorStore["Vector Store<br/>(ChromaDB)"]
+    end
+
+    subgraph IaC["Infrastructure as Code"]
+        Terraform["Terraform Cloud<br/>(TheWinterShadow/thoth-mcp-gcp)"]
+        GHActions["GitHub Actions<br/>(CI/CD)"]
+    end
+
+    %% External connections
+    GitLab -->|Clone/Pull| RepoMgr
+    Claude <-->|MCP Protocol<br/>SSE Transport| HTTPWrapper
+    HuggingFace -->|Download Models| Embedder
+
+    %% Cloud Run internal
+    HTTPWrapper --> MCPServer
+    HTTPWrapper --> Health
+    MCPServer --> VectorStore
+
+    %% Cloud Tasks for parallel ingestion
+    CloudTasks -->|Dispatch Tasks| CloudRun
+    MCPServer -->|Enqueue Jobs| CloudTasks
+
+    %% Ingestion pipeline flow
+    RepoMgr -->|Markdown Files| Chunker
+    Chunker -->|Text Chunks| Embedder
+    Embedder -->|Embeddings| VectorStore
+
+    %% Storage connections
+    VectorStore <-->|Backup/Restore| GCS
+    MCPServer -->|Read| Secrets
+
+    %% Observability
+    CloudRun -->|Logs| Logging
+    CloudRun -->|Metrics| Monitoring
+
+    %% IAM
+    ServiceAccount -->|storage.admin| GCS
+    ServiceAccount -->|secretAccessor| Secrets
+    ServiceAccount -->|cloudtasks.enqueuer| CloudTasks
+    ServiceAccount -->|run.invoker| CloudRun
+
+    %% IaC connections
+    GHActions -->|Build & Push| GCR
+    GHActions -->|Deploy| Terraform
+    Terraform -->|Provision| GCP
+    GCR -->|Pull Image| CloudRun
 ```
-thoth/
-├── __init__.py          # Main package entry point
-├── __about__.py         # Version and metadata
-├── health.py            # Health check for Cloud Run deployments
-├── ingestion/           # Data ingestion and processing
-│   ├── __init__.py
-│   ├── chunker.py       # Markdown document chunker
-│   ├── embedder.py      # Embedding generation with sentence-transformers
-│   ├── gcs_sync.py      # Google Cloud Storage sync for vector DB
-│   ├── repo_manager.py  # GitLab handbook repository manager
-│   └── vector_store.py  # ChromaDB vector database wrapper
-├── mcp_server/          # MCP server implementation
-│   ├── __init__.py
-│   └── server.py        # Main MCP server
-└── utils/               # Utility modules
-    ├── __init__.py
-    └── logger.py        # Logging utilities
+
+### Data Flow Diagram
+
+```mermaid
+flowchart LR
+    subgraph Ingestion["Data Ingestion Flow"]
+        direction TB
+        A1["1. Clone/Update<br/>GitLab Handbook"]
+        A2["2. Discover<br/>Markdown Files"]
+        A3["3. Load Pipeline State<br/>(Resume Support)"]
+        A4["4. Chunk Documents<br/>(500-1000 tokens)"]
+        A5["5. Generate Embeddings<br/>(all-MiniLM-L6-v2)"]
+        A6["6. Store in ChromaDB<br/>(Vector Database)"]
+        A7["7. Backup to GCS<br/>(Optional)"]
+
+        A1 --> A2 --> A3 --> A4 --> A5 --> A6 --> A7
+    end
+
+    subgraph Query["Query Flow"]
+        direction TB
+        B1["1. User Query<br/>(Natural Language)"]
+        B2["2. Check LRU Cache<br/>(100 entries)"]
+        B3["3. Generate Query<br/>Embedding"]
+        B4["4. Vector Similarity<br/>Search (Cosine)"]
+        B5["5. Return Results<br/>+ Metadata"]
+
+        B1 --> B2 --> B3 --> B4 --> B5
+    end
+
+    subgraph Parallel["Parallel Ingestion Flow (Cloud Tasks)"]
+        direction TB
+        C1["1. Trigger Ingestion<br/>(API or Schedule)"]
+        C2["2. Enqueue File Batches<br/>(100 files/batch)"]
+        C3["3. Cloud Tasks Dispatch<br/>(10 concurrent, 5/sec)"]
+        C4["4. Parallel Processing<br/>(Chunk + Embed)"]
+        C5["5. Merge Results<br/>to ChromaDB"]
+
+        C1 --> C2 --> C3 --> C4 --> C5
+    end
+```
+
+### GCP Infrastructure Diagram
+
+```mermaid
+flowchart TB
+    subgraph Terraform["Terraform Cloud (IaC)"]
+        TFState["Remote State<br/>TheWinterShadow/thoth-mcp-gcp"]
+    end
+
+    subgraph APIs["Enabled GCP APIs"]
+        RunAPI["run.googleapis.com"]
+        StorageAPI["storage.googleapis.com"]
+        SecretsAPI["secretmanager.googleapis.com"]
+        TasksAPI["cloudtasks.googleapis.com"]
+        IAMAPI["iam.googleapis.com"]
+    end
+
+    subgraph Resources["GCP Resources"]
+        subgraph Compute["Compute"]
+            CloudRun["Cloud Run Service<br/>thoth-mcp-server<br/>CPU: 2, Memory: 2Gi<br/>Min: 0, Max: 3 instances"]
+        end
+
+        subgraph Queue["Task Queue"]
+            Tasks["Cloud Tasks Queue<br/>thoth-ingestion-queue<br/>10 concurrent, 5/sec<br/>3 retries, 10-60s backoff"]
+        end
+
+        subgraph Store["Storage"]
+            Bucket["GCS Bucket<br/>{project}-thoth-storage<br/>Versioned, 90-day lifecycle"]
+        end
+
+        subgraph SecretMgr["Secret Manager"]
+            S1["gitlab-token"]
+            S2["gitlab-url"]
+            S3["huggingface-token"]
+        end
+
+        subgraph IAM["IAM"]
+            SA["Service Account<br/>thoth-mcp-sa"]
+            R1["roles/storage.admin"]
+            R2["roles/secretmanager.secretAccessor"]
+            R3["roles/cloudtasks.enqueuer"]
+            R4["roles/logging.logWriter"]
+            R5["roles/monitoring.metricWriter"]
+        end
+    end
+
+    TFState -->|Provisions| Resources
+    SA --> R1 --> Bucket
+    SA --> R2 --> SecretMgr
+    SA --> R3 --> Tasks
+    SA --> R4
+    SA --> R5
+    CloudRun -->|Uses| SA
+```
+
+### Component Interaction Diagram
+
+```mermaid
+sequenceDiagram
+    participant User as Claude AI
+    participant HTTP as HTTP Wrapper
+    participant MCP as MCP Server
+    participant VS as Vector Store
+    participant Emb as Embedder
+    participant DB as ChromaDB
+
+    User->>HTTP: MCP Request (SSE)
+    HTTP->>MCP: search_handbook(query)
+    MCP->>MCP: Check LRU Cache
+    alt Cache Miss
+        MCP->>Emb: embed_single(query)
+        Emb-->>MCP: Query Embedding (384-dim)
+        MCP->>VS: search_similar(embedding)
+        VS->>DB: Cosine Similarity Search
+        DB-->>VS: Top K Results
+        VS-->>MCP: Documents + Metadata
+        MCP->>MCP: Update Cache
+    end
+    MCP-->>HTTP: Search Results
+    HTTP-->>User: MCP Response (SSE)
+```
+
+### Parallel Ingestion Sequence
+
+```mermaid
+sequenceDiagram
+    participant API as Cloud Run API
+    participant MCP as MCP Server
+    participant CT as Cloud Tasks
+    participant Worker as Task Worker
+    participant Repo as Repo Manager
+    participant Emb as Embedder
+    participant DB as ChromaDB
+    participant GCS as Cloud Storage
+
+    API->>MCP: POST /ingest (trigger)
+    MCP->>Repo: Clone/Update Handbook
+    Repo-->>MCP: File List (N files)
+
+    loop Batch Files (100/batch)
+        MCP->>CT: Enqueue batch task
+        CT-->>MCP: Task ID
+    end
+
+    par Parallel Processing (10 concurrent)
+        CT->>Worker: Dispatch Task 1
+        Worker->>Emb: Process batch
+        Emb-->>Worker: Embeddings
+        Worker->>DB: Store vectors
+    and
+        CT->>Worker: Dispatch Task 2
+        Worker->>Emb: Process batch
+        Emb-->>Worker: Embeddings
+        Worker->>DB: Store vectors
+    and
+        CT->>Worker: Dispatch Task N...
+    end
+
+    MCP->>GCS: Backup ChromaDB
+    GCS-->>MCP: Backup complete
+    MCP-->>API: Ingestion complete
+```
+
+### Directory Structure
+
+```
+thoth/                              # Main application package
+├── __init__.py                     # Package entry point
+├── __about__.py                    # Version and metadata
+├── cli.py                          # CLI commands (ingest, search, schedule)
+├── health.py                       # Health check for Cloud Run
+├── http_wrapper.py                 # HTTP/SSE wrapper for Cloud Run
+├── scheduler.py                    # APScheduler for automated syncs
+├── monitoring.py                   # Metrics and health monitoring
+├── ingestion/                      # Data ingestion pipeline
+│   ├── pipeline.py                 # Main ingestion orchestrator
+│   ├── chunker.py                  # Markdown document chunker
+│   ├── embedder.py                 # Embedding generation (sentence-transformers)
+│   ├── gcs_sync.py                 # GCS sync for vector DB backup
+│   ├── repo_manager.py             # GitLab handbook repository manager
+│   └── vector_store.py             # ChromaDB vector database wrapper
+├── mcp_server/                     # MCP server implementation
+│   └── server.py                   # ThothMCPServer with search tools
+└── utils/                          # Utility modules
+    ├── logger.py                   # Logging utilities
+    └── secrets.py                  # Secret management
+
+terraform/                          # Infrastructure as Code (Terraform)
+├── main.tf                         # Provider config, Terraform Cloud backend
+├── cloud_run.tf                    # Cloud Run service definition
+├── cloud_tasks.tf                  # Cloud Tasks queue for parallel ingestion
+├── iam.tf                          # Service account, IAM roles, secrets, storage
+├── variables.tf                    # Input variables
+└── outputs.tf                      # Output values
+
+.github/workflows/                  # CI/CD Pipelines
+├── infra-deploy.yml                # Build, Terraform, deploy to Cloud Run
+├── ci.yml                          # Tests on pull requests
+└── cd.yml                          # PyPI publishing on releases
 ```
 
 For detailed information about the project structure and design decisions, see the [Architecture Guide](https://thewintershadow.github.io/Thoth/ARCHITECTURE.html).

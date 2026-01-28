@@ -9,7 +9,7 @@ This document describes the environment variables used by the Thoth application.
 - `PYTHONDONTWRITEBYTECODE=1` - Prevent Python from writing .pyc files
 
 ### Google Cloud Platform
-- `GCP_PROJECT_ID` - Your GCP project ID (e.g., `thoth-483015`)
+- `GCP_PROJECT_ID` - Your GCP project ID (e.g., `thoth-dev-485501`)
 - `GCS_BUCKET_NAME` - Name of GCS bucket for vector DB persistence (e.g., `thoth-storage-bucket`)
 
 ### Application Settings
@@ -43,7 +43,7 @@ When deploying to Google Cloud Run, set these environment variables in the servi
 ```bash
 gcloud run services update thoth-mcp-server \
   --region=us-central1 \
-  --set-env-vars="PYTHONUNBUFFERED=1,GCP_PROJECT_ID=thoth-483015,GCS_BUCKET_NAME=thoth-storage-bucket,LOG_LEVEL=INFO"
+  --set-env-vars="PYTHONUNBUFFERED=1,GCP_PROJECT_ID=thoth-dev-485501,GCS_BUCKET_NAME=thoth-storage-bucket,LOG_LEVEL=INFO"
 ```
 
 Or use the Cloud Console:
@@ -73,7 +73,7 @@ Create a `.env` file in the project root:
 
 ```bash
 # .env
-GCP_PROJECT_ID=thoth-483015
+GCP_PROJECT_ID=thoth-dev-485501
 GCS_BUCKET_NAME=thoth-storage-bucket
 CHROMA_PERSIST_DIRECTORY=./chroma_db
 LOG_LEVEL=DEBUG
@@ -117,7 +117,7 @@ Check environment configuration:
 
 ```bash
 # Run health check
-python -c "from thoth.health import health_check_cli; health_check_cli()"
+python -c "from thoth.shared.health import health_check_cli; health_check_cli()"
 
 # Verify GCS access
 python -c "from google.cloud import storage; client = storage.Client(); print([b.name for b in client.list_buckets()])"
