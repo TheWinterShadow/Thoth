@@ -69,7 +69,7 @@ def mock_vector_store():
 class TestCLIIngest:
     """Tests for the ingest command."""
 
-    @patch("thoth.cli.setup_pipeline")
+    @patch("thoth.shared.cli.setup_pipeline")
     def test_ingest_basic(self, mock_setup, runner, mock_pipeline):
         """Test basic ingest command."""
         mock_setup.return_value = mock_pipeline
@@ -80,7 +80,7 @@ class TestCLIIngest:
         assert mock_pipeline.run.called
         assert "Ingestion Complete" in result.output or result.exit_code == 0
 
-    @patch("thoth.cli.setup_pipeline")
+    @patch("thoth.shared.cli.setup_pipeline")
     def test_ingest_with_force(self, mock_setup, runner, mock_pipeline):
         """Test ingest with force flag."""
         mock_setup.return_value = mock_pipeline
@@ -92,7 +92,7 @@ class TestCLIIngest:
         call_args = mock_pipeline.run.call_args
         assert call_args[1]["force_reclone"] is True
 
-    @patch("thoth.cli.setup_pipeline")
+    @patch("thoth.shared.cli.setup_pipeline")
     def test_ingest_with_full(self, mock_setup, runner, mock_pipeline):
         """Test ingest with full flag (disable incremental)."""
         mock_setup.return_value = mock_pipeline
@@ -103,7 +103,7 @@ class TestCLIIngest:
         call_args = mock_pipeline.run.call_args
         assert call_args[1]["incremental"] is False
 
-    @patch("thoth.cli.setup_pipeline")
+    @patch("thoth.shared.cli.setup_pipeline")
     def test_ingest_with_custom_paths(self, mock_setup, runner, mock_pipeline):
         """Test ingest with custom paths."""
         mock_setup.return_value = mock_pipeline
@@ -132,7 +132,7 @@ class TestCLIIngest:
         assert call_args[2] == "/tmp/db"
         assert call_args[3] == "custom_collection"
 
-    @patch("thoth.cli.setup_pipeline")
+    @patch("thoth.shared.cli.setup_pipeline")
     def test_ingest_with_batch_size(self, mock_setup, runner, mock_pipeline):
         """Test ingest with custom batch size."""
         mock_setup.return_value = mock_pipeline
@@ -142,7 +142,7 @@ class TestCLIIngest:
         assert result.exit_code == 0
         assert mock_pipeline.batch_size == 100
 
-    @patch("thoth.cli.setup_pipeline")
+    @patch("thoth.shared.cli.setup_pipeline")
     def test_ingest_with_failures(self, mock_setup, runner, mock_pipeline):
         """Test ingest command with some failures."""
         # Mock stats with failures
@@ -164,7 +164,7 @@ class TestCLIIngest:
         # Should mention failed files in output
         assert "failed" in result.output.lower() or result.exit_code == 0
 
-    @patch("thoth.cli.setup_pipeline")
+    @patch("thoth.shared.cli.setup_pipeline")
     def test_ingest_error(self, mock_setup, runner, mock_pipeline):
         """Test ingest command with error."""
         mock_pipeline.run.side_effect = RuntimeError("Test error")
@@ -174,7 +174,7 @@ class TestCLIIngest:
 
         assert result.exit_code != 0
 
-    @patch("thoth.cli.setup_pipeline")
+    @patch("thoth.shared.cli.setup_pipeline")
     def test_ingest_progress_callback(self, mock_setup, runner, mock_pipeline):
         """Test that progress callback is called during ingestion."""
 
@@ -208,7 +208,7 @@ class TestCLIIngest:
 class TestCLIStatus:
     """Tests for the status command."""
 
-    @patch("thoth.cli.setup_pipeline")
+    @patch("thoth.shared.cli.setup_pipeline")
     def test_status_basic(self, mock_setup, runner, mock_pipeline):
         """Test basic status command."""
         mock_setup.return_value = mock_pipeline
@@ -220,7 +220,7 @@ class TestCLIStatus:
         # Check for expected output elements
         assert "Status" in result.output or "Pipeline" in result.output or result.exit_code == 0
 
-    @patch("thoth.cli.setup_pipeline")
+    @patch("thoth.shared.cli.setup_pipeline")
     def test_status_with_custom_paths(self, mock_setup, runner, mock_pipeline):
         """Test status with custom paths."""
         mock_setup.return_value = mock_pipeline
@@ -241,7 +241,7 @@ class TestCLIStatus:
         assert result.exit_code == 0
         mock_setup.assert_called_once()
 
-    @patch("thoth.cli.setup_pipeline")
+    @patch("thoth.shared.cli.setup_pipeline")
     def test_status_with_failures(self, mock_setup, runner, mock_pipeline):
         """Test status command showing failed files."""
         # Update mock to include failed files
@@ -257,7 +257,7 @@ class TestCLIStatus:
         assert result.exit_code == 0
         assert "Failed" in result.output or result.exit_code == 0
 
-    @patch("thoth.cli.setup_pipeline")
+    @patch("thoth.shared.cli.setup_pipeline")
     def test_status_error(self, mock_setup, runner, mock_pipeline):
         """Test status command with error."""
         mock_pipeline.get_status.side_effect = RuntimeError("Test error")
@@ -271,7 +271,7 @@ class TestCLIStatus:
 class TestCLIReset:
     """Tests for the reset command."""
 
-    @patch("thoth.cli.setup_pipeline")
+    @patch("thoth.shared.cli.setup_pipeline")
     def test_reset_basic(self, mock_setup, runner, mock_pipeline):
         """Test basic reset command."""
         mock_setup.return_value = mock_pipeline
@@ -285,7 +285,7 @@ class TestCLIReset:
         call_args = mock_pipeline.reset.call_args
         assert call_args[1]["keep_repo"] is False
 
-    @patch("thoth.cli.setup_pipeline")
+    @patch("thoth.shared.cli.setup_pipeline")
     def test_reset_keep_repo(self, mock_setup, runner, mock_pipeline):
         """Test reset with keep-repo flag."""
         mock_setup.return_value = mock_pipeline
@@ -296,7 +296,7 @@ class TestCLIReset:
         call_args = mock_pipeline.reset.call_args
         assert call_args[1]["keep_repo"] is True
 
-    @patch("thoth.cli.setup_pipeline")
+    @patch("thoth.shared.cli.setup_pipeline")
     def test_reset_cancel(self, mock_setup, runner, mock_pipeline):
         """Test canceling reset command."""
         mock_setup.return_value = mock_pipeline
@@ -307,7 +307,7 @@ class TestCLIReset:
         assert result.exit_code != 0
         assert not mock_pipeline.reset.called
 
-    @patch("thoth.cli.setup_pipeline")
+    @patch("thoth.shared.cli.setup_pipeline")
     def test_reset_error(self, mock_setup, runner, mock_pipeline):
         """Test reset command with error."""
         mock_pipeline.reset.side_effect = RuntimeError("Test error")
@@ -321,8 +321,8 @@ class TestCLIReset:
 class TestCLISearch:
     """Tests for the search command."""
 
-    @patch("thoth.cli.VectorStore")
-    @patch("thoth.cli.Embedder")
+    @patch("thoth.shared.cli.VectorStore")
+    @patch("thoth.shared.cli.Embedder")
     def test_search_basic(self, mock_embedder_class, mock_store_class, runner, mock_vector_store):
         """Test basic search command."""
         mock_store_class.return_value = mock_vector_store
@@ -332,8 +332,8 @@ class TestCLISearch:
         assert result.exit_code == 0
         assert mock_vector_store.search_similar.called
 
-    @patch("thoth.cli.VectorStore")
-    @patch("thoth.cli.Embedder")
+    @patch("thoth.shared.cli.VectorStore")
+    @patch("thoth.shared.cli.Embedder")
     def test_search_with_limit(self, mock_embedder_class, mock_store_class, runner, mock_vector_store):
         """Test search with custom limit."""
         mock_store_class.return_value = mock_vector_store
@@ -344,8 +344,8 @@ class TestCLISearch:
         call_args = mock_vector_store.search_similar.call_args
         assert call_args[1]["n_results"] == 3
 
-    @patch("thoth.cli.VectorStore")
-    @patch("thoth.cli.Embedder")
+    @patch("thoth.shared.cli.VectorStore")
+    @patch("thoth.shared.cli.Embedder")
     def test_search_with_custom_paths(self, mock_embedder_class, mock_store_class, runner):
         """Test search with custom database paths."""
         runner.invoke(
@@ -367,8 +367,8 @@ class TestCLISearch:
         assert call_args["persist_directory"] == "/tmp/db"
         assert call_args["collection_name"] == "custom"
 
-    @patch("thoth.cli.VectorStore")
-    @patch("thoth.cli.Embedder")
+    @patch("thoth.shared.cli.VectorStore")
+    @patch("thoth.shared.cli.Embedder")
     def test_search_no_documents(self, mock_embedder_class, mock_store_class, runner):
         """Test search when no documents exist."""
         mock_store = MagicMock()
@@ -380,8 +380,8 @@ class TestCLISearch:
         assert result.exit_code == 0
         assert "No documents" in result.output or "ingest" in result.output
 
-    @patch("thoth.cli.VectorStore")
-    @patch("thoth.cli.Embedder")
+    @patch("thoth.shared.cli.VectorStore")
+    @patch("thoth.shared.cli.Embedder")
     def test_search_no_results(self, mock_embedder_class, mock_store_class, runner):
         """Test search with no results."""
         mock_store = MagicMock()
@@ -398,8 +398,8 @@ class TestCLISearch:
         assert result.exit_code == 0
         assert "No results" in result.output or "Found 0 results" in result.output
 
-    @patch("thoth.cli.VectorStore")
-    @patch("thoth.cli.Embedder")
+    @patch("thoth.shared.cli.VectorStore")
+    @patch("thoth.shared.cli.Embedder")
     def test_search_error(self, mock_embedder_class, mock_store_class, runner):
         """Test search command with error."""
         mock_store = MagicMock()
@@ -471,12 +471,12 @@ class TestCLIGeneral:
 class TestSetupPipeline:
     """Tests for the setup_pipeline helper function."""
 
-    @patch("thoth.cli.HandbookRepoManager")
-    @patch("thoth.cli.MarkdownChunker")
-    @patch("thoth.cli.Embedder")
-    @patch("thoth.cli.VectorStore")
-    @patch("thoth.cli.IngestionPipeline")
-    @patch("thoth.cli.setup_logger")
+    @patch("thoth.shared.cli.HandbookRepoManager")
+    @patch("thoth.shared.cli.MarkdownChunker")
+    @patch("thoth.shared.cli.Embedder")
+    @patch("thoth.shared.cli.VectorStore")
+    @patch("thoth.shared.cli.IngestionPipeline")
+    @patch("thoth.shared.cli.setup_logger")
     def test_setup_pipeline_defaults(
         self,
         mock_logger,
@@ -496,12 +496,12 @@ class TestSetupPipeline:
         assert mock_store_class.called
         assert mock_pipeline_class.called
 
-    @patch("thoth.cli.HandbookRepoManager")
-    @patch("thoth.cli.MarkdownChunker")
-    @patch("thoth.cli.Embedder")
-    @patch("thoth.cli.VectorStore")
-    @patch("thoth.cli.IngestionPipeline")
-    @patch("thoth.cli.setup_logger")
+    @patch("thoth.shared.cli.HandbookRepoManager")
+    @patch("thoth.shared.cli.MarkdownChunker")
+    @patch("thoth.shared.cli.Embedder")
+    @patch("thoth.shared.cli.VectorStore")
+    @patch("thoth.shared.cli.IngestionPipeline")
+    @patch("thoth.shared.cli.setup_logger")
     def test_setup_pipeline_custom_values(
         self,
         mock_logger,

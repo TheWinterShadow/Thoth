@@ -68,10 +68,15 @@ class TestHandbookRepoManager(unittest.TestCase):
         mock_repo_class.clone_from.assert_called_once()
         self.assertEqual(result, self.test_clone_path)
 
+    @patch("thoth.ingestion.repo_manager.Repo")
     @patch.object(Path, "exists")
-    def test_clone_handbook_raises_when_exists_no_force(self, mock_exists):
+    def test_clone_handbook_raises_when_exists_no_force(self, mock_exists, mock_repo_class):
         """Test that cloning raises error when repository exists without force."""
         mock_exists.return_value = True
+        # Mock Repo to indicate a valid repo exists at the path
+        mock_repo = MagicMock()
+        mock_repo.head = MagicMock()  # Make it look like a valid repo
+        mock_repo_class.return_value = mock_repo
 
         with self.assertRaises(RuntimeError) as context:
             self.manager.clone_handbook(force=False)

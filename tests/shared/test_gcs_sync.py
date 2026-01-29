@@ -12,7 +12,7 @@ from thoth.shared.gcs_sync import GCSSync, GCSSyncError
 @pytest.fixture
 def mock_storage_client():
     """Mock Google Cloud Storage client."""
-    with patch("thoth.ingestion.gcs_sync.storage") as mock_storage:
+    with patch("thoth.shared.gcs_sync.storage") as mock_storage:
         mock_client = Mock()
         mock_bucket = Mock()
         mock_bucket.exists.return_value = True
@@ -63,7 +63,7 @@ class TestGCSSync:
     def test_init_without_gcs_available(self):
         """Test initialization fails when google-cloud-storage not installed."""
         with (
-            patch("thoth.ingestion.gcs_sync.GCS_AVAILABLE", False),
+            patch("thoth.shared.gcs_sync.GCS_AVAILABLE", False),
             pytest.raises(GCSSyncError, match="not installed"),
         ):
             GCSSync(bucket_name="test-bucket")

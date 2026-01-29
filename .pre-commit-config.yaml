@@ -1,5 +1,18 @@
 # Pre-commit configuration for Thoth project
 # See https://pre-commit.com for more information
+#
+# This config mirrors the GitHub Actions CI workflow:
+# - Lint & Format: ruff check, ruff format
+# - Type Check: mypy
+# - Security: bandit
+# - Tests: pytest
+#
+# Usage:
+#   pre-commit run --all-files    # Full CI suite (lint + type check + security + tests)
+#   pre-commit run ruff-check     # Run specific hook only
+#
+# For faster commits (skip tests), use:
+#   SKIP=pytest git commit -m "message"
 
 default_stages: [pre-commit]
 minimum_pre_commit_version: '3.0.0'
@@ -15,7 +28,7 @@ repos:
         types: [python]
         require_serial: true
       - id: ruff-format
-        name: ruff-format  
+        name: ruff-format
         entry: hatch run lint:ruff format
         language: system
         types: [python]
@@ -43,6 +56,16 @@ repos:
         require_serial: true
         pass_filenames: false
 
+  # pytest - Unit tests
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest
+        entry: hatch test
+        language: system
+        pass_filenames: false
+        always_run: true
+
 # CI configuration
 ci:
   autofix_commit_msg: |
@@ -53,5 +76,5 @@ ci:
   autoupdate_branch: ''
   autoupdate_commit_msg: '[pre-commit.ci] pre-commit autoupdate'
   autoupdate_schedule: weekly
-  skip: []
+  skip: [pytest]  # Skip tests in CI (they run separately in GitHub Actions)
   submodules: false

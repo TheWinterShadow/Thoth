@@ -137,7 +137,7 @@ class TestMCPServerHandlers(unittest.IsolatedAsyncioTestCase):
 class TestServerRunMethods(unittest.IsolatedAsyncioTestCase):
     """Test suite for server run methods."""
 
-    @patch("thoth.mcp_server.server.stdio_server")
+    @patch("thoth.mcp.server.server.stdio_server")
     async def test_run_method(self, mock_stdio):
         """Test that run method starts server with stdio transport."""
         # Setup mocks
@@ -157,7 +157,7 @@ class TestServerRunMethods(unittest.IsolatedAsyncioTestCase):
             # Verify server.run was called
             mock_run.assert_called_once()
 
-    @patch("thoth.mcp_server.server.ThothMCPServer")
+    @patch("thoth.mcp.server.server.ThothMCPServer")
     async def test_main_function(self, mock_server_class):
         """Test that main function creates and runs server."""
         mock_server_instance = AsyncMock()
@@ -172,15 +172,15 @@ class TestServerRunMethods(unittest.IsolatedAsyncioTestCase):
 class TestRunServerFunction(unittest.TestCase):
     """Test suite for synchronous run_server function."""
 
-    @patch("thoth.mcp_server.server.asyncio.run")
+    @patch("thoth.mcp.server.server.asyncio.run")
     def test_run_server_success(self, mock_asyncio_run):
         """Test that run_server calls asyncio.run with main."""
         run_server()
         # Verify asyncio.run was called once (don't check the exact coroutine object)
         mock_asyncio_run.assert_called_once()
 
-    @patch("thoth.mcp_server.server.asyncio.run")
-    @patch("thoth.mcp_server.server.logger")
+    @patch("thoth.mcp.server.server.asyncio.run")
+    @patch("thoth.mcp.server.server.logger")
     def test_run_server_keyboard_interrupt(self, mock_logger, mock_asyncio_run):
         """Test that run_server handles KeyboardInterrupt gracefully."""
         mock_asyncio_run.side_effect = KeyboardInterrupt()
@@ -189,8 +189,8 @@ class TestRunServerFunction(unittest.TestCase):
         run_server()
         mock_logger.info.assert_called_with("Server shutdown requested")
 
-    @patch("thoth.mcp_server.server.asyncio.run")
-    @patch("thoth.mcp_server.server.logger")
+    @patch("thoth.mcp.server.server.asyncio.run")
+    @patch("thoth.mcp.server.server.logger")
     def test_run_server_exception(self, mock_logger, mock_asyncio_run):
         """Test that run_server logs and re-raises exceptions."""
         test_exception = RuntimeError("Test error")
@@ -679,7 +679,7 @@ class TestSearchHandbookTool(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Handbook database not available", error_msg)
         self.assertIn("ingested", error_msg)
 
-    @patch("thoth.mcp_server.server.VectorStore")
+    @patch("thoth.mcp.server.server.VectorStore")
     async def test_vector_store_initialization_failure(self, mock_vector_store):
         """Test handling of vector store initialization failure."""
         mock_vector_store.side_effect = Exception("Database connection failed")
@@ -1120,7 +1120,7 @@ class TestGetRecentUpdatesTools(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Error", result)
         self.assertIn("not found", result.lower())
 
-    @patch("thoth.mcp_server.server.Repo")
+    @patch("thoth.mcp.server.server.Repo")
     async def test_get_recent_updates_with_mock_repo(self, mock_repo_class):
         """Test get_recent_updates with mocked git repository."""
         # Create mock repository
@@ -1184,7 +1184,7 @@ class TestGetRecentUpdatesTools(unittest.IsolatedAsyncioTestCase):
         # Should handle the parameter without crashing
         self.assertIsInstance(result, str)
 
-    @patch("thoth.mcp_server.server.Repo")
+    @patch("thoth.mcp.server.server.Repo")
     async def test_get_recent_updates_filters_by_path(self, mock_repo_class):
         """Test that path filtering works correctly."""
         # Create mock repository
@@ -1479,7 +1479,7 @@ class TestVectorStoreIntegration(unittest.IsolatedAsyncioTestCase):
         # Should set vector_store to None without crashing
         self.assertIsNone(server.vector_store)
 
-    @patch("thoth.mcp_server.server.VectorStore")
+    @patch("thoth.mcp.server.server.VectorStore")
     async def test_init_vector_store_error_handling(self, mock_vs):
         """Test _init_vector_store handles exceptions gracefully."""
         mock_vs.side_effect = RuntimeError("Database error")
@@ -1555,7 +1555,7 @@ class TestErrorHandlingComprehensive(unittest.IsolatedAsyncioTestCase):
         """Test _get_recent_updates handles GitCommandError."""
         with (
             tempfile.TemporaryDirectory() as tmpdir,
-            patch("thoth.mcp_server.server.Repo") as mock_repo,
+            patch("thoth.mcp.server.server.Repo") as mock_repo,
         ):
             self.server.handbook_repo_path = tmpdir
             Path(tmpdir, ".git").mkdir()
@@ -1570,7 +1570,7 @@ class TestErrorHandlingComprehensive(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             self.server.handbook_repo_path = tmpdir
 
-            with patch("thoth.mcp_server.server.Repo") as mock_repo:
+            with patch("thoth.mcp.server.server.Repo") as mock_repo:
                 mock_repo.side_effect = OSError("File system error")
 
                 result = await self.server._get_recent_updates()
@@ -1964,7 +1964,7 @@ class TestMCPHandlerIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(filtered, [])
         self.assertIsInstance(filtered, list)
 
-    @patch("thoth.mcp_server.server.VectorStore")
+    @patch("thoth.mcp.server.server.VectorStore")
     async def test_init_vector_store_os_error(self, mock_vs):
         """Test _init_vector_store handles OSError."""
         mock_vs.side_effect = OSError("Disk error")
@@ -1973,7 +1973,7 @@ class TestMCPHandlerIntegration(unittest.IsolatedAsyncioTestCase):
         # Should handle error gracefully
         self.assertIsNone(server.vector_store)
 
-    @patch("thoth.mcp_server.server.VectorStore")
+    @patch("thoth.mcp.server.server.VectorStore")
     async def test_init_vector_store_value_error(self, mock_vs):
         """Test _init_vector_store handles ValueError."""
         mock_vs.side_effect = ValueError("Invalid config")
@@ -1982,7 +1982,7 @@ class TestMCPHandlerIntegration(unittest.IsolatedAsyncioTestCase):
         # Should handle error gracefully
         self.assertIsNone(server.vector_store)
 
-    @patch("thoth.mcp_server.server.Path")
+    @patch("thoth.mcp.server.server.Path")
     async def test_init_vector_store_db_exists_check(self, mock_path):
         """Test _init_vector_store checks if database exists."""
         # Mock Path to return false for exists()

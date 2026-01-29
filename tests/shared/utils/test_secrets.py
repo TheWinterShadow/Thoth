@@ -49,7 +49,7 @@ class TestSecretManagerClient:
             request={"name": "projects/test-project/secrets/test-secret/versions/latest"}
         )
 
-    @patch("thoth.utils.secrets.secretmanager", create=True)
+    @patch("thoth.shared.utils.secrets.secretmanager", create=True)
     def test_get_secret_with_error_fallback(self, mock_secretmanager):
         """Test secret retrieval falls back on error."""
         # Mock Secret Manager to raise error
