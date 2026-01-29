@@ -39,7 +39,10 @@ async def clone_to_gcs(_request: Request) -> JSONResponse:
         pipeline = IngestionPipeline()
         if not pipeline.gcs_repo_sync:
             return JSONResponse(
-                {"status": "error", "message": "GCS repo sync not configured (not in Cloud Run environment)"},
+                {
+                    "status": "error",
+                    "message": "GCS repo sync not configured (not in Cloud Run environment)",
+                },
                 status_code=400,
             )
 
@@ -65,7 +68,10 @@ async def process_batch(request: Request) -> JSONResponse:
         file_list = body.get("file_list")
 
         if start_index is None or end_index is None:
-            return JSONResponse({"status": "error", "message": "Missing start_index or end_index"}, status_code=400)
+            return JSONResponse(
+                {"status": "error", "message": "Missing start_index or end_index"},
+                status_code=400,
+            )
 
         logger.info("Processing batch: files %d-%d", start_index, end_index)
 
@@ -86,7 +92,10 @@ async def process_batch(request: Request) -> JSONResponse:
             "chroma_db",
         )
         if sync_result:
-            logger.info("Synced vector store to GCS: %d files", sync_result.get("uploaded_files", 0))
+            logger.info(
+                "Synced vector store to GCS: %d files",
+                sync_result.get("uploaded_files", 0),
+            )
 
         return JSONResponse({"status": "success", **result})
     except Exception as e:
@@ -150,7 +159,12 @@ async def trigger_ingestion(_request: Request) -> JSONResponse:
         batch_size = int(os.getenv("BATCH_SIZE", "100"))
         num_batches = (total_files + batch_size - 1) // batch_size
 
-        logger.info("Creating %d tasks for %d files (batch size: %d)", num_batches, total_files, batch_size)
+        logger.info(
+            "Creating %d tasks for %d files (batch size: %d)",
+            num_batches,
+            total_files,
+            batch_size,
+        )
 
         # Create tasks for each batch
         task_names = []

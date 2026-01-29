@@ -11,6 +11,8 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from thoth.shared.utils.secrets import get_secret_manager
+
 # Constants
 DEFAULT_BASE_URL = "https://gitlab.com/api/v4"
 DEFAULT_TIMEOUT = 30
@@ -79,8 +81,6 @@ class GitLabAPIClient:
         # Try to get token and base_url from Secret Manager or environment
         if token is None:
             try:
-                from thoth.shared.utils.secrets import get_secret_manager  # noqa: PLC0415
-
                 secret_manager = get_secret_manager()
                 token = secret_manager.get_gitlab_token()
                 if token:
@@ -96,8 +96,6 @@ class GitLabAPIClient:
 
         if base_url == DEFAULT_BASE_URL:
             try:
-                from thoth.shared.utils.secrets import get_secret_manager  # noqa: PLC0415
-
                 secret_manager = get_secret_manager()
                 custom_url = secret_manager.get_gitlab_url()
                 if custom_url and custom_url != "https://gitlab.com":

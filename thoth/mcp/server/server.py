@@ -111,7 +111,9 @@ class ThothMCPServer:
         # Use /tmp paths in Cloud Run (GCS environment)
         if os.getenv("GCS_BUCKET_NAME") and os.getenv("GCP_PROJECT_ID"):
             self.handbook_db_path = "/tmp/chroma_db"  # nosec B108 - Cloud Run requires /tmp
-            self.handbook_repo_path = handbook_repo_path or "/tmp/handbook"  # nosec B108
+            self.handbook_repo_path = (
+                handbook_repo_path or "/tmp/handbook"  # nosec B108
+            )
         else:
             self.handbook_db_path = handbook_db_path
             self.handbook_repo_path = handbook_repo_path or str(Path.home() / ".thoth" / "handbook")

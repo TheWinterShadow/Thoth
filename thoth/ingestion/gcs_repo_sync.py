@@ -73,7 +73,11 @@ class GCSRepoSync:
             Repo.clone_from(self.repo_url, str(tmp_path))
 
             # Upload all files to GCS
-            logger.info("Uploading repository to GCS bucket: %s/%s", self.bucket_name, self.gcs_prefix)
+            logger.info(
+                "Uploading repository to GCS bucket: %s/%s",
+                self.bucket_name,
+                self.gcs_prefix,
+            )
             uploaded = 0
 
             for file_path in tmp_path.rglob("*"):

@@ -18,6 +18,18 @@ default_stages: [pre-commit]
 minimum_pre_commit_version: '3.0.0'
 
 repos:
+
+  # Type Check
+  - repo: local
+    hooks:
+      - id: type-check
+        name: type-check
+        entry: hatch run dev:typecheck
+        language: system
+        types: [python]
+        require_serial: true
+        pass_filenames: false
+
   # Ruff - Fast Python linter and formatter (managed by hatch)
   - repo: local
     hooks:

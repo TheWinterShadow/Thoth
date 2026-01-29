@@ -48,7 +48,10 @@ class TestHTTPWrapper:
             patch("thoth.mcp.http_wrapper.uvicorn"),
             patch("thoth.mcp.http_wrapper.HealthCheck") as mock_health,
         ):
-            mock_health.get_health_status.return_value = {"status": "healthy", "timestamp": "2024-01-01T00:00:00Z"}
+            mock_health.get_health_status.return_value = {
+                "status": "healthy",
+                "timestamp": "2024-01-01T00:00:00Z",
+            }
 
             # This would test the health_check function if we could extract it
             # For now, just verify HealthCheck is called

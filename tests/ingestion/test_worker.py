@@ -36,7 +36,10 @@ class TestWorkerEndpoints:
     @pytest.mark.asyncio
     async def test_health_endpoint_exists(self):
         """Test health endpoint is configured."""
-        with patch("thoth.ingestion.worker.uvicorn"), patch("thoth.ingestion.worker.Starlette") as mock_starlette:
+        with (
+            patch("thoth.ingestion.worker.uvicorn"),
+            patch("thoth.ingestion.worker.Starlette") as mock_starlette,
+        ):
             main()
 
             # Verify Starlette app was created with routes
@@ -47,7 +50,10 @@ class TestWorkerEndpoints:
     @pytest.mark.asyncio
     async def test_clone_to_gcs_endpoint_exists(self):
         """Test clone-to-gcs endpoint is configured."""
-        with patch("thoth.ingestion.worker.uvicorn"), patch("thoth.ingestion.worker.Starlette") as mock_starlette:
+        with (
+            patch("thoth.ingestion.worker.uvicorn"),
+            patch("thoth.ingestion.worker.Starlette") as mock_starlette,
+        ):
             main()
 
             # Verify routes were registered
@@ -58,7 +64,10 @@ class TestWorkerEndpoints:
     @pytest.mark.asyncio
     async def test_ingest_endpoint_exists(self):
         """Test ingest endpoint is configured."""
-        with patch("thoth.ingestion.worker.uvicorn"), patch("thoth.ingestion.worker.Starlette") as mock_starlette:
+        with (
+            patch("thoth.ingestion.worker.uvicorn"),
+            patch("thoth.ingestion.worker.Starlette") as mock_starlette,
+        ):
             main()
 
             call_kwargs = mock_starlette.call_args[1]
@@ -73,7 +82,10 @@ class TestWorkerCloudTasksIntegration:
     @pytest.mark.asyncio
     async def test_batch_processing_endpoint(self):
         """Test batch processing endpoint configuration."""
-        with patch("thoth.ingestion.worker.uvicorn"), patch("thoth.ingestion.worker.Starlette"):
+        with (
+            patch("thoth.ingestion.worker.uvicorn"),
+            patch("thoth.ingestion.worker.Starlette"),
+        ):
             # Should not raise any errors
             main()
 
@@ -81,6 +93,9 @@ class TestWorkerCloudTasksIntegration:
     @patch("thoth.ingestion.worker.IngestionPipeline")
     async def test_pipeline_integration(self, mock_pipeline):
         """Test worker integrates with IngestionPipeline."""
-        with patch("thoth.ingestion.worker.uvicorn"), patch("thoth.ingestion.worker.Starlette"):
+        with (
+            patch("thoth.ingestion.worker.uvicorn"),
+            patch("thoth.ingestion.worker.Starlette"),
+        ):
             main()
             # Worker should be ready to use IngestionPipeline
