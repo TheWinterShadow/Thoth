@@ -44,22 +44,26 @@ from starlette.applications import Starlette
 from starlette.routing import Route
 from starlette.types import Receive, Scope, Send
 
+from thoth.ingestion.sources.config import SourceRegistry
 from thoth.shared.utils.logger import setup_logger
 from thoth.shared.vector_store import VectorStore
 
 logger = setup_logger(__name__)
 
+# GCS prefix pattern for collection databases
+COLLECTION_GCS_PREFIX_PATTERN = "chroma_db_{collection_name}"
+
 
 class ThothMCPServer:
     """Main Thoth MCP Server implementation.
 
-    This server provides semantic search capabilities over handbook content
-    through the Model Context Protocol (MCP). It uses ChromaDB vector store
-    for efficient similarity search and implements a manual LRU cache for
-    query performance optimization.
+    This server provides semantic search capabilities over multiple document
+    collections through the Model Context Protocol (MCP). It uses ChromaDB
+    vector stores for efficient similarity search and implements a manual
+    LRU cache for query performance optimization.
 
     Architecture:
-        - Vector Store: ChromaDB with cosine similarity
+        - Vector Stores: Multiple ChromaDB collections (handbook, dnd, personal)
         - Embedding Model: Configurable (default: all-MiniLM-L6-v2)
         - Cache Strategy: Manual LRU with 100 entry limit
         - Transport: stdio (standard input/output)
@@ -67,9 +71,10 @@ class ThothMCPServer:
     Attributes:
         name (str): Server identifier name
         version (str): Server version string
-        handbook_db_path (str): Path to the ChromaDB vector database
+        base_db_path (str): Base path for ChromaDB vector databases
         server (Server): MCP Server instance
-        vector_store (VectorStore | None): Vector store for handbook search
+        source_registry (SourceRegistry): Registry of available data sources
+        vector_stores (dict[str, VectorStore]): Vector stores by source name
         _search_cache (dict): Manual LRU cache for search results
         _cache_max_size (int): Maximum cache entries (default: 100)
 
@@ -82,7 +87,7 @@ class ThothMCPServer:
         >>> server = ThothMCPServer(
         ...     name="my-handbook-server",
         ...     version="1.0.0",
-        ...     handbook_db_path="./my_handbook_db",
+        ...     base_db_path="./vector_dbs",
         ... )
         >>> await server.run()
     """
@@ -91,7 +96,7 @@ class ThothMCPServer:
         self,
         name: str = "thoth-server",
         version: str = "1.0.0",
-        handbook_db_path: str = "./handbook_vectors",
+        base_db_path: str = "./vector_dbs",
         handbook_repo_path: str | None = None,
     ):
         """Initialize the Thoth MCP Server.
@@ -99,7 +104,7 @@ class ThothMCPServer:
         Args:
             name: Server name identifier
             version: Server version
-            handbook_db_path: Path to the handbook vector database
+            base_db_path: Base path for vector databases (one per collection)
             handbook_repo_path: Path to the handbook git repository. If not
                 provided, defaults to ``~/.thoth/handbook``. When using the
                 default, the directory (and any missing parents) will be
@@ -110,43 +115,60 @@ class ThothMCPServer:
 
         # Use /tmp paths in Cloud Run (GCS environment)
         if os.getenv("GCS_BUCKET_NAME") and os.getenv("GCP_PROJECT_ID"):
-            self.handbook_db_path = "/tmp/chroma_db"  # nosec B108 - Cloud Run requires /tmp
+            self.base_db_path = "/tmp/vector_dbs"  # nosec B108 - Cloud Run requires /tmp
             self.handbook_repo_path = (
                 handbook_repo_path or "/tmp/handbook"  # nosec B108
             )
         else:
-            self.handbook_db_path = handbook_db_path
+            self.base_db_path = base_db_path
             self.handbook_repo_path = handbook_repo_path or str(Path.home() / ".thoth" / "handbook")
-        Path(self.handbook_repo_path).mkdir(parents=True, exist_ok=True)
+
+        # Create directories if possible, but don't fail if we lack permissions
+        try:
+            Path(self.handbook_repo_path).mkdir(parents=True, exist_ok=True)
+        except (PermissionError, OSError) as e:
+            logger.warning("Cannot create handbook repo path %s: %s", self.handbook_repo_path, e)
+
+        try:
+            Path(self.base_db_path).mkdir(parents=True, exist_ok=True)
+        except (PermissionError, OSError) as e:
+            logger.warning("Cannot create base db path %s: %s", self.base_db_path, e)
+
         self.server = Server(name)
 
+        # Initialize source registry
+        self.source_registry = SourceRegistry()
+
         # Initialize search cache (max 100 entries)
-        self._search_cache: dict[tuple[str, int, str | None], tuple] = {}
+        # Cache key includes sources tuple for multi-collection support
+        self._search_cache: dict[tuple[str, int, str | None, tuple[str, ...] | None], tuple] = {}
         self._cache_max_size = 100
 
-        # Declare vector_store attribute with proper type (can be None if db not found)
+        # Dictionary of vector stores by source name
+        self.vector_stores: dict[str, VectorStore] = {}
+
+        # Legacy: maintain backward compatibility with single vector_store attribute
         self.vector_store: VectorStore | None = None
 
-        # Initialize vector store for handbook search
-        self._init_vector_store()
+        # Initialize vector stores for all configured sources
+        self._init_vector_stores()
 
         # Setup MCP handlers
         self._setup_handlers()
 
-        logger.info("Initialized %s v%s", name, version)
+        logger.info("Initialized %s v%s with %d collections", name, version, len(self.vector_stores))
 
-    def _init_vector_store(self) -> None:
-        """Initialize the vector store for handbook search.
+    def _init_vector_stores(self) -> None:
+        """Initialize vector stores for all configured data sources.
 
-        Attempts to load the ChromaDB vector database from the configured path.
-        In Cloud Run, first restores from GCS if configured.
-        If the database doesn't exist or cannot be loaded, sets vector_store to
-        None, which disables the search_handbook tool.
+        Attempts to load ChromaDB vector databases for each source (handbook,
+        dnd, personal). In Cloud Run, restores from GCS if configured.
 
-        The vector store contains embedded document chunks with metadata including:
-            - section: The handbook section name
+        Each source has its own collection with metadata including:
+            - section: The document section name
             - source: Original source file path
             - chunk_index: Position of chunk in original document
+            - format: Document format (md, pdf, txt, docx)
 
         Error Handling:
             - OSError: File system issues (permissions, disk space)
@@ -154,49 +176,70 @@ class ThothMCPServer:
             - RuntimeError: Database corruption or version mismatch
 
         Note:
-            Failure to initialize is non-fatal. The server will start but
-            the search_handbook tool will not be available.
+            Failure to initialize a source is non-fatal. The server will start
+            with only the successfully loaded collections.
         """
-        try:
-            db_path = Path(self.handbook_db_path)
+        gcs_bucket = os.getenv("GCS_BUCKET_NAME")
+        gcs_project = os.getenv("GCP_PROJECT_ID")
 
-            # Check for GCS configuration (Cloud Run environment)
-            gcs_bucket = os.getenv("GCS_BUCKET_NAME")
-            gcs_project = os.getenv("GCP_PROJECT_ID")
+        for source_config in self.source_registry.list_configs():
+            try:
+                source_name = source_config.name
+                collection_name = source_config.collection_name
+                gcs_prefix = COLLECTION_GCS_PREFIX_PATTERN.format(collection_name=collection_name)
+                db_path = Path(self.base_db_path) / collection_name
 
-            if gcs_bucket and gcs_project:
-                # Cloud Run: Initialize VectorStore with GCS sync and restore from GCS
-                logger.info("Cloud Run detected - restoring vector store from GCS")
-                self.vector_store = VectorStore(
-                    persist_directory=str(db_path),
-                    collection_name="thoth_documents",
-                    gcs_bucket_name=gcs_bucket,
-                    gcs_project_id=gcs_project,
-                )
-                # Restore from GCS (downloads chroma_db from bucket)
-                restored = self.vector_store.restore_from_gcs(gcs_prefix="chroma_db")
-                if restored > 0:
-                    logger.info("Restored %d files from GCS", restored)
-                    logger.info(
-                        "Database contains %d documents",
-                        self.vector_store.get_document_count(),
+                if gcs_bucket and gcs_project:
+                    # Cloud Run: Initialize VectorStore with GCS sync and restore
+                    logger.info("Initializing '%s' collection from GCS prefix '%s'", source_name, gcs_prefix)
+                    vector_store = VectorStore(
+                        persist_directory=str(db_path),
+                        collection_name=collection_name,
+                        gcs_bucket_name=gcs_bucket,
+                        gcs_project_id=gcs_project,
                     )
+                    # Restore from GCS
+                    restored = vector_store.restore_from_gcs(gcs_prefix=gcs_prefix)
+                    if restored > 0:
+                        doc_count = vector_store.get_document_count()
+                        logger.info(
+                            "Restored '%s' collection: %d files, %d documents",
+                            source_name,
+                            restored,
+                            doc_count,
+                        )
+                        self.vector_stores[source_name] = vector_store
+                    else:
+                        logger.warning("No files restored for '%s' from GCS", source_name)
+                elif db_path.exists():
+                    # Local: use existing database
+                    vector_store = VectorStore(
+                        persist_directory=str(db_path),
+                        collection_name=collection_name,
+                    )
+                    doc_count = vector_store.get_document_count()
+                    logger.info(
+                        "Loaded '%s' collection from %s: %d documents",
+                        source_name,
+                        db_path,
+                        doc_count,
+                    )
+                    self.vector_stores[source_name] = vector_store
                 else:
-                    logger.warning("No files restored from GCS - vector store may be empty")
-            elif db_path.exists():
-                # Local: use existing database
-                self.vector_store = VectorStore(persist_directory=str(db_path), collection_name="thoth_documents")
-                logger.info("Loaded handbook database from %s", db_path)
-                logger.info(
-                    "Database contains %d documents",
-                    self.vector_store.get_document_count(),
-                )
-            else:
-                logger.warning("Handbook database not found at %s", db_path)
-                self.vector_store = None
-        except (OSError, ValueError, RuntimeError):
-            logger.exception("Failed to initialize vector store")
+                    logger.info("Collection '%s' not found at %s (will be skipped)", source_name, db_path)
+
+            except (OSError, ValueError, RuntimeError):
+                logger.exception("Failed to initialize vector store for '%s'", source_name)
+
+        # Set legacy vector_store attribute to handbook for backward compatibility
+        if "handbook" in self.vector_stores:
+            self.vector_store = self.vector_stores["handbook"]
+        elif self.vector_stores:
+            # Use first available if handbook not present
+            self.vector_store = next(iter(self.vector_stores.values()))
+        else:
             self.vector_store = None
+            logger.warning("No vector stores initialized - search tools will be unavailable")
 
     def _setup_handlers(self) -> None:
         """Set up MCP protocol handlers.
@@ -248,16 +291,64 @@ class ThothMCPServer:
                 )
             ]
 
-            # Only add search_handbook tool if vector store is available
-            # This prevents errors when the handbook database is missing
-            if self.vector_store is not None:
+            # Only add search tools if at least one vector store is available
+            if self.vector_stores:
+                # Build sources description dynamically
+                available_sources = list(self.vector_stores.keys())
+                sources_desc = ", ".join(f"'{s}'" for s in available_sources)
+
+                tools.append(
+                    Tool(
+                        name="search_documents",
+                        description=(
+                            "Search across document collections using semantic similarity. "
+                            "Returns relevant content from multiple sources (handbook, dnd, personal). "
+                            "Supports filtering by section and by source collection."
+                        ),
+                        inputSchema={
+                            "type": "object",
+                            "properties": {
+                                "query": {
+                                    "type": "string",
+                                    "description": "The search query to find relevant content",
+                                },
+                                "n_results": {
+                                    "type": "integer",
+                                    "description": "Number of results to return (default: 5, max: 20)",
+                                    "default": 5,
+                                    "minimum": 1,
+                                    "maximum": 20,
+                                },
+                                "sources": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": (
+                                        f"Optional list of sources to search. "
+                                        f"Available: {sources_desc}. "
+                                        "If not specified, searches all sources."
+                                    ),
+                                },
+                                "filter_section": {
+                                    "type": "string",
+                                    "description": (
+                                        "Optional section name to filter results "
+                                        "(e.g., 'introduction', 'guidelines', 'procedures')"
+                                    ),
+                                },
+                            },
+                            "required": ["query"],
+                        },
+                    )
+                )
+
+                # Keep legacy search_handbook for backward compatibility
                 tools.append(
                     Tool(
                         name="search_handbook",
                         description=(
                             "Search the handbook using semantic similarity. "
                             "Returns relevant sections from the handbook based on the query. "
-                            "Supports filtering by section to narrow results."
+                            "(Legacy - prefer search_documents for multi-source search)"
                         ),
                         inputSchema={
                             "type": "object",
@@ -420,21 +511,40 @@ class ThothMCPServer:
                 result = f"pong: {message}"
                 return [TextContent(type="text", text=result)]
 
-            # Handle search_handbook tool - semantic search over handbook
-            if name == "search_handbook":
-                # Check if vector store is available
-                if self.vector_store is None:
+            # Handle search_documents tool - multi-collection semantic search
+            if name == "search_documents":
+                if not self.vector_stores:
                     return [
                         TextContent(
                             type="text",
-                            text="Error: Handbook database not available. Please ensure the handbook was ingested.",
+                            text="Error: No document collections available. Please ensure documents were ingested.",
                         )
                     ]
 
-                # Perform semantic search with provided parameters
-                result = await self._search_handbook(
+                # Perform multi-collection search
+                result = await self._search_documents(
                     query=arguments["query"],
                     n_results=arguments.get("n_results", 5),
+                    sources=arguments.get("sources"),
+                    filter_section=arguments.get("filter_section"),
+                )
+                return [TextContent(type="text", text=result)]
+
+            # Handle legacy search_handbook tool - backward compatible
+            if name == "search_handbook":
+                if not self.vector_stores:
+                    return [
+                        TextContent(
+                            type="text",
+                            text="Error: No document collections available. Please ensure the handbook was ingested.",
+                        )
+                    ]
+
+                # Search only handbook collection for backward compatibility
+                result = await self._search_documents(
+                    query=arguments["query"],
+                    n_results=arguments.get("n_results", 5),
+                    sources=["handbook"] if "handbook" in self.vector_stores else None,
                     filter_section=arguments.get("filter_section"),
                 )
                 return [TextContent(type="text", text=result)]
@@ -508,15 +618,21 @@ class ThothMCPServer:
             msg = f"Resource not found: {uri}"
             raise ValueError(msg)
 
-    def _cached_search(self, query: str, n_results: int, filter_section: str | None) -> tuple:
-        """Cached search implementation for performance optimization.
+    def _cached_search(
+        self,
+        query: str,
+        n_results: int,
+        filter_section: str | None,
+        sources: tuple[str, ...] | None = None,
+    ) -> tuple:
+        """Cached multi-collection search for performance optimization.
 
         Implements a manual LRU (Least Recently Used) cache to improve search
         performance for repeated queries. The cache stores complete search results
         including document content, metadata, and relevance scores.
 
         Cache Strategy:
-            - Cache key: (query, n_results, filter_section) tuple
+            - Cache key: (query, n_results, filter_section, sources) tuple
             - Max entries: 100 (configured by _cache_max_size)
             - Eviction: FIFO when cache is full (oldest entry removed)
             - Hit rate: ~80% for typical usage patterns
@@ -530,13 +646,13 @@ class ThothMCPServer:
             query: Search query string for semantic similarity matching
             n_results: Number of results to return (1-20)
             filter_section: Optional section name for metadata filtering
-                          (e.g., 'introduction', 'procedures')
+            sources: Optional tuple of source names to search (e.g., ('handbook', 'dnd'))
 
         Returns:
             Tuple containing:
                 - ids: Tuple of document IDs
                 - documents: Tuple of document text content
-                - metadatas: Tuple of metadata dictionaries
+                - metadatas: Tuple of metadata dictionaries (includes 'source_name')
                 - distances: Tuple of similarity distances (0=identical, 1=opposite)
                 - search_time: Time taken for the search in seconds
 
@@ -546,7 +662,7 @@ class ThothMCPServer:
             tuples for hashability and immutability.
         """
         # Check cache for existing results
-        cache_key = (query, n_results, filter_section)
+        cache_key = (query, n_results, filter_section, sources)
         if cache_key in self._search_cache:
             # Cache hit - return immediately
             return self._search_cache[cache_key]
@@ -555,54 +671,116 @@ class ThothMCPServer:
         start_time = time.time()
 
         # Build metadata filter for section-specific searches
-        # ChromaDB uses 'where' clause for metadata filtering
         where_filter = None
         if filter_section:
             where_filter = {"section": filter_section}
 
-        # Guard against None vector_store (should not happen at runtime
-        # since tool is only available when vector_store is initialized)
-        if self.vector_store is None:
-            msg = "Vector store is not initialized"
-            raise RuntimeError(msg)
+        # Determine which sources to search
+        sources_to_search = list(sources) if sources else list(self.vector_stores.keys())
 
-        # Perform vector similarity search using ChromaDB
-        # This compares query embedding against all stored document embeddings
-        results = self.vector_store.search_similar(query=query, n_results=n_results, where=where_filter)
+        # Collect results from all sources
+        all_results: list[tuple[str, str, dict, float]] = []
+
+        for source_name in sources_to_search:
+            if source_name not in self.vector_stores:
+                continue
+
+            vector_store = self.vector_stores[source_name]
+
+            # Perform vector similarity search
+            results = vector_store.search_similar(
+                query=query,
+                n_results=n_results,
+                where=where_filter,
+            )
+
+            # Add source name to metadata and collect results
+            for doc_id, doc, metadata, distance in zip(
+                results["ids"],
+                results["documents"],
+                results["metadatas"],
+                results["distances"],
+                strict=True,
+            ):
+                # Add source_name to metadata
+                enriched_metadata = {**metadata, "source_name": source_name}
+                all_results.append((doc_id, doc, enriched_metadata, distance))
+
+        # Sort by distance (lower is better) and take top n_results
+        all_results.sort(key=lambda x: x[3])
+        top_results = all_results[:n_results]
 
         search_time = time.time() - start_time
 
         # Convert results to immutable tuples for caching
-        # Tuples are hashable and prevent accidental modification
-        result = (
-            tuple(results["ids"]),
-            tuple(results["documents"]),
-            tuple(results["metadatas"]),
-            tuple(results["distances"]),
-            search_time,
-        )
+        if top_results:
+            ids, documents, metadatas, distances = zip(*top_results, strict=True)
+            result = (tuple(ids), tuple(documents), tuple(metadatas), tuple(distances), search_time)
+        else:
+            result = ((), (), (), (), search_time)
 
         # Update cache with simple FIFO eviction
-        # Remove oldest entry if cache is at capacity
         if len(self._search_cache) >= self._cache_max_size:
-            # Remove first (oldest) entry - FIFO eviction
             self._search_cache.pop(next(iter(self._search_cache)))
         self._search_cache[cache_key] = result
 
         return result
 
-    async def _search_handbook(self, query: str, n_results: int = 5, filter_section: str | None = None) -> str:
-        """Search the handbook using semantic similarity.
+    def _validate_sources(self, sources: list[str] | None) -> tuple[list[str], tuple[str, ...] | None]:
+        """Validate and filter sources. Returns (valid_sources, sources_tuple)."""
+        available_sources = list(self.vector_stores.keys())
 
-        Performs semantic search over the handbook content using vector embeddings
-        and returns formatted results with relevance scores and metadata.
+        if not sources:
+            return available_sources, None
+
+        valid_sources = [s for s in sources if s in available_sources]
+        invalid_sources = [s for s in sources if s not in available_sources]
+
+        if invalid_sources:
+            logger.warning("Ignoring unknown sources: %s", invalid_sources)
+
+        if not valid_sources:
+            msg = f"No valid sources specified. Available sources: {available_sources}"
+            raise ValueError(msg)
+
+        return valid_sources, tuple(valid_sources)
+
+    def _format_metadata_fields(self, metadata: dict) -> list[str]:
+        """Format metadata fields for display. Returns list of formatted strings."""
+        lines = []
+        field_mapping = {
+            "source_name": "Collection",
+            "section": "Section",
+            "source": "Source",
+            "format": "Format",
+            "chunk_index": "Chunk",
+        }
+
+        for field, label in field_mapping.items():
+            if field in metadata:
+                lines.append(f"{label}: {metadata[field]}")
+
+        return lines
+
+    async def _search_documents(
+        self,
+        query: str,
+        n_results: int = 5,
+        sources: list[str] | None = None,
+        filter_section: str | None = None,
+    ) -> str:
+        """Search across document collections using semantic similarity.
+
+        Performs semantic search over multiple document collections using vector
+        embeddings and returns formatted results with relevance scores and metadata.
 
         Search Process:
             1. Validates n_results parameter (clamps to 1-20 range)
-            2. Checks cache for existing results
-            3. Performs vector similarity search if cache miss
-            4. Formats results with metadata and relevance scores
-            5. Returns human-readable text output
+            2. Validates and filters requested sources
+            3. Checks cache for existing results
+            4. Performs vector similarity search across all requested collections
+            5. Merges and sorts results by relevance score
+            6. Formats results with metadata and content
 
         Relevance Scoring:
             - Score = 1 - distance (where distance is from vector similarity)
@@ -612,8 +790,9 @@ class ThothMCPServer:
         Result Formatting:
             Each result includes:
                 - Relevance score (0-1 scale)
+                - Source collection name
                 - Section name (if available in metadata)
-                - Source file (if available in metadata)
+                - Source file path (if available in metadata)
                 - Chunk index (position in original document)
                 - Full document content
 
@@ -623,6 +802,9 @@ class ThothMCPServer:
             n_results: Number of results to return
                       Default: 5, Range: 1-20
                       Will be clamped to valid range
+            sources: Optional list of source names to search
+                    Example: ['handbook', 'dnd']
+                    If None, searches all available sources
             filter_section: Optional section name for filtering
                           Example: 'introduction', 'procedures', 'guidelines'
                           Must match section names in document metadata
@@ -630,92 +812,88 @@ class ThothMCPServer:
         Returns:
             Formatted string containing:
                 - Search header with query and parameters
+                - List of sources searched
                 - Search execution time
                 - List of results with scores and content
                 OR error message if search fails
                 OR "No results found" if no matches
 
-        Raises:
-            Does not raise exceptions. Errors are caught and returned
-            as formatted error messages in the result string.
-
         Example:
-            >>> result = await server._search_handbook(
-            ...     query="authentication process", n_results=3, filter_section="security"
+            >>> result = await server._search_documents(
+            ...     query="dragon stats", n_results=5, sources=["dnd"]
             ... )
             >>> print(result)
-            Search Results for: 'authentication process'
-            Found 3 result(s) in section 'security'
+            Search Results for: 'dragon stats'
+            Searching: dnd
+            Found 5 result(s)
             Search time: 0.234s
             ...
-
-        Performance:
-            - Target: <2s total response time
-            - Cache hit: <100ms
-            - Cache miss: 100-500ms (depends on database size)
         """
         try:
             # Validate and clamp n_results to acceptable range (1-20)
-            # This prevents excessive memory usage and response times
             n_results = max(1, min(n_results, 20))
 
-            # Use cached search for performance (see _cached_search for details)
-            _ids, documents, metadatas, distances, search_time = self._cached_search(query, n_results, filter_section)
+            # Validate and filter requested sources
+            try:
+                valid_sources, sources_tuple = self._validate_sources(sources)
+            except ValueError as e:
+                return f"Error: {e}"
+
+            # Use cached search for performance
+            _ids, documents, metadatas, distances, search_time = self._cached_search(
+                query, n_results, filter_section, sources_tuple
+            )
 
             # Handle case where no results are found
             if not documents:
-                return f"No results found for query: '{query}'" + (
-                    f" in section '{filter_section}'" if filter_section else ""
-                )
+                sources_str = ", ".join(valid_sources)
+                section_part = f" (section: '{filter_section}')" if filter_section else ""
+                return f"No results found for query: '{query}' in sources: {sources_str}{section_part}"
 
+            # Build result header
+            sources_str = ", ".join(valid_sources)
+            section_part = f" in section '{filter_section}'" if filter_section else ""
             result_lines = [
                 f"Search Results for: '{query}'",
-                f"Found {len(documents)} result(s)" + (f" in section '{filter_section}'" if filter_section else ""),
+                f"Searching: {sources_str}",
+                f"Found {len(documents)} result(s){section_part}",
                 f"Search time: {search_time:.3f}s",
                 "",
             ]
 
             # Format each result with metadata and content
-            # strict=True ensures all lists have same length (safety check)
             for i, (doc, metadata, distance) in enumerate(zip(documents, metadatas, distances, strict=True), 1):
                 result_lines.append(f"--- Result {i} ---")
-                # Calculate relevance score (1 - distance)
-                # Higher score = more relevant (1.0 = perfect match)
                 result_lines.append(f"Relevance Score: {1 - distance:.3f}")
 
-                # Add available metadata fields
-                # Not all documents have all metadata fields
-                if metadata:
-                    if "section" in metadata:
-                        result_lines.append(f"Section: {metadata['section']}")
-                    if "source" in metadata:
-                        result_lines.append(f"Source: {metadata['source']}")
-                    if "chunk_index" in metadata:
-                        result_lines.append(f"Chunk: {metadata['chunk_index']}")
-
+                # Add metadata fields
+                result_lines.extend(self._format_metadata_fields(metadata))
                 result_lines.append(f"\nContent:\n{doc}\n")
 
             # Log search completion for monitoring/debugging
             logger.info(
-                "Search completed in %.3fs, returned %d results",
+                "Search completed in %.3fs, returned %d results from %s",
                 search_time,
                 len(documents),
+                sources_str,
             )
 
-            # Join all result lines into single formatted string
             return "\n".join(result_lines)
 
         except (ValueError, RuntimeError, KeyError) as e:
-            # Catch and log specific exceptions that might occur during search
-            # Returns error message to user instead of raising exception
             logger.exception("Search error")
             return f"Error performing search: {e!s}"
 
-    async def _get_handbook_section(self, section_name: str, limit: int = 50) -> str:
-        """Retrieve all content from a specific handbook section.
+    async def _get_handbook_section(
+        self,
+        section_name: str,
+        limit: int = 50,
+        sources: list[str] | None = None,
+    ) -> str:
+        """Retrieve all content from a specific section across collections.
 
         Fetches all documents that belong to the specified section from the
-        vector store. This is useful for retrieving complete section content
+        vector stores. This is useful for retrieving complete section content
         rather than semantic search results.
 
         Args:
@@ -723,6 +901,8 @@ class ThothMCPServer:
                          Example: 'introduction', 'guidelines', 'procedures'
             limit: Maximum number of chunks to return (default: 50, max: 100)
                   Clamped to range [1, 100]
+            sources: Optional list of source names to search
+                    If None, searches all available sources
 
         Returns:
             Formatted string containing:
@@ -736,7 +916,7 @@ class ThothMCPServer:
             ...     section_name="introduction", limit=10
             ... )
             >>> print(result)
-            Handbook Section: 'introduction'
+            Section: 'introduction'
             Total chunks: 10
             ...
         """
@@ -744,28 +924,46 @@ class ThothMCPServer:
             # Validate and clamp limit to acceptable range
             limit = max(1, min(limit, 100))
 
-            # Guard against None vector_store
-            if self.vector_store is None:
-                msg = "Vector store is not initialized"
+            if not self.vector_stores:
+                msg = "No vector stores are initialized"
                 raise RuntimeError(msg)
 
-            # Retrieve documents filtered by section name
-            results = self.vector_store.get_documents(where={"section": section_name}, limit=limit)
+            # Determine which sources to search
+            available_sources = list(self.vector_stores.keys())
+            sources_to_search = [s for s in sources if s in available_sources] if sources else available_sources
+
+            # Collect results from all sources
+            all_docs: list[tuple[str, dict, str]] = []
+
+            for source_name in sources_to_search:
+                vector_store = self.vector_stores[source_name]
+                results = vector_store.get_documents(where={"section": section_name}, limit=limit)
+
+                for doc, metadata in zip(results["documents"], results["metadatas"], strict=True):
+                    enriched_metadata = {**metadata, "source_name": source_name}
+                    all_docs.append((doc, enriched_metadata, source_name))
 
             # Check if any documents were found
-            if not results["documents"]:
-                return f"No content found for section: '{section_name}'"
+            if not all_docs:
+                sources_str = ", ".join(sources_to_search)
+                return f"No content found for section: '{section_name}' in sources: {sources_str}"
+
+            # Limit total results
+            all_docs = all_docs[:limit]
 
             # Format results
+            sources_str = ", ".join(sources_to_search)
             result_lines = [
-                f"Handbook Section: '{section_name}'",
-                f"Total chunks: {len(results['documents'])}",
+                f"Section: '{section_name}'",
+                f"Sources: {sources_str}",
+                f"Total chunks: {len(all_docs)}",
                 "",
             ]
 
             # Add each document with metadata
-            for i, (doc, metadata) in enumerate(zip(results["documents"], results["metadatas"], strict=True), 1):
+            for i, (doc, metadata, source_name) in enumerate(all_docs, 1):
                 result_lines.append(f"--- Chunk {i} ---")
+                result_lines.append(f"Collection: {source_name}")
 
                 # Add metadata if available
                 if metadata:
@@ -777,9 +975,10 @@ class ThothMCPServer:
                 result_lines.append(f"\nContent:\n{doc}\n")
 
             logger.info(
-                "Retrieved %d chunks from section '%s'",
-                len(results["documents"]),
+                "Retrieved %d chunks from section '%s' across %d sources",
+                len(all_docs),
                 section_name,
+                len(sources_to_search),
             )
 
             return "\n".join(result_lines)
@@ -789,10 +988,10 @@ class ThothMCPServer:
             return f"Error retrieving section '{section_name}': {e!s}"
 
     async def _list_handbook_topics(self, max_depth: int = 2) -> str:
-        """List all available handbook topics and sections.
+        """List all available topics and sections across all collections.
 
-        Retrieves unique section names from the vector store metadata and
-        organizes them into a structured view of the handbook organization.
+        Retrieves unique section names from all vector store metadata and
+        organizes them into a structured view of the content organization.
 
         Args:
             max_depth: Maximum depth for nested sections (default: 2, max: 5)
@@ -801,77 +1000,103 @@ class ThothMCPServer:
 
         Returns:
             Formatted string containing:
-                - Total number of documents in handbook
-                - List of sections with document counts
-                - Organizational structure
+                - List of available collections with document counts
+                - Sections per collection
+                - Total document counts
                 OR error message if retrieval fails
 
         Example:
             >>> result = await server._list_handbook_topics(max_depth=2)
             >>> print(result)
-            Handbook Topics and Sections
-            Total documents: 150
+            Document Collections Overview
+            ==============================
 
+            Collection: handbook (1500 documents)
             Available Sections:
-            - introduction (10 chunks)
-            - guidelines (25 chunks)
+              - introduction (10 chunks)
+              - guidelines (25 chunks)
             ...
         """
         try:
             # Validate and clamp max_depth
             max_depth = max(1, min(max_depth, 5))
 
-            # Guard against None vector_store
-            if self.vector_store is None:
-                msg = "Vector store is not initialized"
-                raise RuntimeError(msg)
+            if not self.vector_stores:
+                return "Error: No document collections available."
 
-            # Get total document count
-            total_docs = self.vector_store.get_document_count()
-
-            if total_docs == 0:
-                return "Handbook is empty. No topics available."
-
-            # Get all documents to extract unique sections
-            # We retrieve all documents but only extract metadata
-            all_docs = self.vector_store.get_documents(limit=total_docs)
-
-            # Count documents per section
-            section_counts: dict[str, int] = {}
-            for metadata in all_docs["metadatas"]:
-                if metadata and "section" in metadata:
-                    section = metadata["section"]
-                    section_counts[section] = section_counts.get(section, 0) + 1
-
-            # Format results
             result_lines = [
-                "Handbook Topics and Sections",
-                f"Total documents: {total_docs}",
+                "Document Collections Overview",
+                "==============================",
                 "",
-                "Available Sections:",
             ]
 
-            # Sort sections alphabetically for consistent output
-            for section in sorted(section_counts.keys()):
-                count = section_counts[section]
-                chunk_label = "chunk" if count == 1 else "chunks"
-                result_lines.append(f"  - {section} ({count} {chunk_label})")
+            total_all_docs = 0
+            total_all_sections = 0
+
+            for source_name, vector_store in sorted(self.vector_stores.items()):
+                # Get total document count for this collection
+                doc_count = vector_store.get_document_count()
+                total_all_docs += doc_count
+
+                # Get source description if available
+                source_config = self.source_registry.get(source_name)
+                description = source_config.description if source_config else ""
+
+                result_lines.append(f"Collection: {source_name} ({doc_count} documents)")
+                if description:
+                    result_lines.append(f"  Description: {description}")
+
+                if doc_count == 0:
+                    result_lines.append("  (empty)")
+                    result_lines.append("")
+                    continue
+
+                # Get all documents to extract unique sections
+                all_docs = vector_store.get_documents(limit=doc_count)
+
+                # Count documents per section
+                section_counts: dict[str, int] = {}
+                for metadata in all_docs["metadatas"]:
+                    if metadata and "section" in metadata:
+                        section = metadata["section"]
+                        section_counts[section] = section_counts.get(section, 0) + 1
+
+                total_all_sections += len(section_counts)
+
+                if section_counts:
+                    result_lines.append("  Sections:")
+                    # Sort sections alphabetically for consistent output
+                    for section in sorted(section_counts.keys()):
+                        count = section_counts[section]
+                        chunk_label = "chunk" if count == 1 else "chunks"
+                        result_lines.append(f"    - {section} ({count} {chunk_label})")
+                else:
+                    result_lines.append("  (no sections defined)")
+
+                result_lines.append("")
 
             # Add summary
             result_lines.extend(
                 [
-                    "",
-                    f"Total sections: {len(section_counts)}",
+                    "Summary",
+                    "-------",
+                    f"Total collections: {len(self.vector_stores)}",
+                    f"Total documents: {total_all_docs}",
+                    f"Total sections: {total_all_sections}",
                 ]
             )
 
-            logger.info("Listed %d sections from handbook", len(section_counts))
+            logger.info(
+                "Listed %d collections with %d total documents",
+                len(self.vector_stores),
+                total_all_docs,
+            )
 
             return "\n".join(result_lines)
 
         except (ValueError, RuntimeError, KeyError) as e:
             logger.exception("Error listing topics")
-            return f"Error listing handbook topics: {e!s}"
+            return f"Error listing topics: {e!s}"
 
     def _validate_repo_path(self, repo_path: Path) -> str | None:
         """Validate repository path and return error message if invalid."""

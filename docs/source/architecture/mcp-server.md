@@ -1,14 +1,14 @@
 # MCP Server Architecture
 
-This document describes the Model Context Protocol (MCP) server that provides semantic search capabilities to AI assistants.
+This document describes the Model Context Protocol (MCP) server that provides semantic search capabilities to AI assistants across multiple document collections.
 
 ## Overview
 
 The MCP server enables AI assistants like Claude to:
-1. Search handbook documentation using natural language
-2. Retrieve specific sections by topic
-3. List available handbook topics
-4. Get recent documentation updates
+1. Search across multiple document collections (handbook, D&D, personal)
+2. Filter searches by specific sources
+3. Retrieve documents with relevance-based ranking
+4. Access cached results for improved performance
 
 ## System Architecture
 
@@ -28,8 +28,13 @@ flowchart TB
         CA[Query Cache]
     end
 
+    subgraph Collections["ChromaDB Collections"]
+        HB[(handbook_documents)]
+        DND[(dnd_documents)]
+        PER[(personal_documents)]
+    end
+
     subgraph Storage["Data Layer"]
-        VS[(ChromaDB)]
         GCS[(GCS Backup)]
     end
 
@@ -38,8 +43,8 @@ flowchart TB
     SSE --> MCP
     MCP --> TH
     TH --> CA
-    CA -->|cache miss| VS
-    VS <-->|sync| GCS
+    CA -->|cache miss| HB & DND & PER
+    HB & DND & PER <-->|sync| GCS
 ```
 
 ## MCP Protocol Flow
@@ -51,7 +56,7 @@ sequenceDiagram
     participant MCP as MCP Server
     participant Tools as Tool Handlers
     participant Cache as Query Cache
-    participant DB as ChromaDB
+    participant DB as ChromaDB Collections
 
     Client->>SSE: GET /sse (establish connection)
     SSE-->>Client: SSE stream opened
@@ -61,15 +66,15 @@ sequenceDiagram
     MCP-->>SSE: Tool definitions
     SSE-->>Client: Available tools
 
-    Client->>SSE: call_tool (search_handbook)
+    Client->>SSE: call_tool (search_documents)
     SSE->>MCP: Parse request
     MCP->>Tools: Execute search
     Tools->>Cache: Check cache
     alt Cache Hit
         Cache-->>Tools: Cached results
     else Cache Miss
-        Tools->>DB: Semantic search
-        DB-->>Tools: Results
+        Tools->>DB: Search across collections
+        DB-->>Tools: Results (merged by relevance)
         Tools->>Cache: Store in cache
     end
     Tools-->>MCP: Search results
@@ -92,14 +97,15 @@ Provides HTTP/SSE transport for Cloud Run deployment:
 
 ### MCP Server (`thoth/mcp/server/server.py`)
 
-Core MCP protocol implementation:
+Core MCP protocol implementation with multi-collection support:
 
 ```mermaid
 classDiagram
     class ThothMCPServer {
-        -vector_store: VectorStore
+        -vector_stores: dict[str, VectorStore]
         -embedder: Embedder
         -cache: dict
+        -source_registry: SourceRegistry
         +list_tools() List~Tool~
         +call_tool(name, args) Result
         +list_resources() List~Resource~
@@ -107,18 +113,21 @@ classDiagram
     }
 
     class VectorStore {
+        +collection_name: str
         +search(query, n_results) List~Document~
         +get(ids) List~Document~
         +add(documents) void
+        +sync_from_gcs(prefix) void
     }
 
-    class Embedder {
-        +embed(text) List~float~
-        +embed_batch(texts) List~List~float~~
+    class SourceRegistry {
+        +list_sources() List~str~
+        +get(name) SourceConfig
+        +list_configs() List~SourceConfig~
     }
 
-    ThothMCPServer --> VectorStore
-    ThothMCPServer --> Embedder
+    ThothMCPServer --> VectorStore : manages multiple
+    ThothMCPServer --> SourceRegistry
 ```
 
 ## Available Tools
@@ -130,8 +139,35 @@ Simple connectivity test.
 
 **Returns**: `{"status": "ok", "message": "pong"}`
 
-### `search_handbook`
-Semantic search across handbook documentation.
+### `search_documents`
+Search across multiple document collections with optional source filtering.
+
+**Arguments**:
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `query` | string | Yes | Natural language search query |
+| `sources` | array | No | Filter by sources (default: all). Options: `handbook`, `dnd`, `personal` |
+| `n_results` | integer | No | Max results per source (default: 10, max: 20) |
+
+**Returns**: List of matching documents sorted by relevance with:
+- `content`: Matched text content
+- `metadata`: File path, source, relevance score
+- `source`: Which collection the result came from
+
+**Example**:
+```json
+{
+  "name": "search_documents",
+  "arguments": {
+    "query": "code review best practices",
+    "sources": ["handbook", "personal"],
+    "n_results": 5
+  }
+}
+```
+
+### `search_handbook` (Legacy)
+Search handbook documentation only. Maintained for backward compatibility.
 
 **Arguments**:
 | Name | Type | Required | Description |
@@ -144,41 +180,46 @@ Semantic search across handbook documentation.
 - `content`: Matched text content
 - `metadata`: File path, section, relevance score
 
-### `get_handbook_section`
-Retrieve a specific section by path.
+## Multi-Collection Search
 
-**Arguments**:
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| `path` | string | Yes | Section path (e.g., "engineering/onboarding") |
+The server initializes vector stores for all configured sources at startup:
 
-**Returns**: Full section content with metadata
+```mermaid
+flowchart TB
+    subgraph Init["Server Initialization"]
+        SR[Source Registry]
+        SR -->|handbook| VS1[VectorStore: handbook_documents]
+        SR -->|dnd| VS2[VectorStore: dnd_documents]
+        SR -->|personal| VS3[VectorStore: personal_documents]
+    end
 
-### `list_handbook_topics`
-List all available handbook topics.
+    subgraph Search["search_documents(query, sources)"]
+        Q[Query]
+        Q -->|sources=all| VS1 & VS2 & VS3
+        Q -->|sources=handbook,dnd| VS1 & VS2
+        VS1 & VS2 & VS3 --> M[Merge Results]
+        M --> S[Sort by Relevance]
+        S --> R[Return Top N]
+    end
+```
 
-**Arguments**: None
+### Search Algorithm
 
-**Returns**: Hierarchical list of topics and subtopics
-
-### `get_recent_updates`
-Get recently updated documentation.
-
-**Arguments**:
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| `days` | integer | No | Lookback period (default: 7) |
-
-**Returns**: List of recently modified documents
+1. **Parse sources**: If not specified, search all available collections
+2. **Parallel search**: Query each source's vector store
+3. **Merge results**: Combine results from all sources
+4. **Sort by relevance**: Order by similarity score (descending)
+5. **Deduplicate**: Remove duplicate documents
+6. **Limit results**: Return top N results
 
 ## Caching Strategy
 
 ```mermaid
 flowchart TB
-    Q[Query] --> H{Hash Query}
+    Q[Query + Sources] --> H{Hash Key}
     H --> C{In Cache?}
     C -->|Yes| R[Return Cached]
-    C -->|No| S[Search DB]
+    C -->|No| S[Search Collections]
     S --> ST[Store in Cache]
     ST --> R2[Return Results]
 
@@ -192,8 +233,25 @@ flowchart TB
 **Cache Configuration**:
 - Type: LRU (Least Recently Used)
 - Max entries: 100
+- Key: Hash of (query, sources, n_results)
 - TTL: Session-based (cleared on restart)
 - Hit rate target: ~80% for repeated queries
+
+## Vector Store Initialization
+
+Each collection is synced from GCS at startup:
+
+```python
+# GCS prefix pattern for collections
+COLLECTION_GCS_PREFIX_PATTERN = "chroma_db_{collection_name}"
+
+# Example prefixes:
+# - chroma_db_handbook_documents
+# - chroma_db_dnd_documents
+# - chroma_db_personal_documents
+```
+
+The server handles missing collections gracefully - if a collection doesn't exist in GCS, it's skipped during initialization and searches return empty results for that source.
 
 ## Performance Targets
 
@@ -249,6 +307,63 @@ Environment variables:
 |----------|---------|-------------|
 | `LOG_LEVEL` | `INFO` | Logging verbosity |
 | `CHROMA_PATH` | `/tmp/chroma` | ChromaDB storage path |
-| `GCS_BUCKET` | - | GCS bucket for DB sync |
+| `GCS_BUCKET_NAME` | - | GCS bucket for DB sync |
+| `GCP_PROJECT_ID` | - | GCP project ID |
 | `CACHE_SIZE` | `100` | Max cache entries |
 | `PORT` | `8080` | HTTP server port |
+
+## Usage Examples
+
+### Search All Collections
+
+```bash
+# Via MCP protocol
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "search_documents",
+    "arguments": {
+      "query": "how to set up development environment"
+    }
+  }
+}
+```
+
+### Search Specific Sources
+
+```bash
+# Search only handbook and personal docs
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/call",
+  "params": {
+    "name": "search_documents",
+    "arguments": {
+      "query": "authentication flow",
+      "sources": ["handbook", "personal"],
+      "n_results": 5
+    }
+  }
+}
+```
+
+### Legacy Handbook Search
+
+```bash
+# Backward compatible with existing integrations
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "method": "tools/call",
+  "params": {
+    "name": "search_handbook",
+    "arguments": {
+      "query": "onboarding checklist",
+      "n_results": 10
+    }
+  }
+}
+```

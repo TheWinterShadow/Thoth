@@ -3,9 +3,9 @@ info:
   title: Thoth API
   description: |
     API specification for Thoth services:
-    - **MCP Server**: Model Context Protocol server for AI assistants
-    - **Ingestion Worker**: Document processing and embedding pipeline
-  version: 1.0.0
+    - **MCP Server**: Model Context Protocol server for AI assistants with multi-collection search
+    - **Ingestion Worker**: Document processing and embedding pipeline with job tracking
+  version: 2.0.0
   contact:
     name: TheWinterShadow
     url: https://github.com/TheWinterShadow/Thoth
@@ -21,12 +21,14 @@ tags:
     description: Model Context Protocol endpoints
   - name: Ingestion
     description: Document ingestion endpoints
+  - name: Jobs
+    description: Job status and management
   - name: Health
     description: Health check endpoints
 
 paths:
   # ============================================================================
-  # MCP Server Endpoints
+  # Health Endpoints
   # ============================================================================
   /:
     get:
@@ -62,6 +64,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/DetailedHealthResponse'
 
+  # ============================================================================
+  # MCP Server Endpoints
+  # ============================================================================
   /sse:
     get:
       tags: [MCP Server]
@@ -91,6 +96,11 @@ paths:
         - `tools/call` - Execute a tool
         - `resources/list` - List available resources
         - `resources/read` - Read a resource
+
+        **Available Tools:**
+        - `ping` - Simple connectivity test
+        - `search_documents` - Search across multiple document collections
+        - `search_handbook` - Legacy search (handbook only, backward compatible)
       operationId: sendMessage
       requestBody:
         required: true
@@ -105,16 +115,28 @@ paths:
                   jsonrpc: "2.0"
                   id: 1
                   method: "tools/list"
-              searchHandbook:
-                summary: Search handbook
+              searchDocuments:
+                summary: Search across collections
                 value:
                   jsonrpc: "2.0"
                   id: 2
                   method: "tools/call"
                   params:
-                    name: "search_handbook"
+                    name: "search_documents"
                     arguments:
                       query: "onboarding process"
+                      sources: ["handbook", "dnd"]
+                      n_results: 10
+              searchHandbookLegacy:
+                summary: Search handbook (legacy)
+                value:
+                  jsonrpc: "2.0"
+                  id: 3
+                  method: "tools/call"
+                  params:
+                    name: "search_handbook"
+                    arguments:
+                      query: "code review guidelines"
                       n_results: 5
       responses:
         '202':
@@ -129,14 +151,14 @@ paths:
   # ============================================================================
   # Ingestion Worker Endpoints
   # ============================================================================
-  /clone-to-gcs:
+  /clone-handbook:
     post:
       tags: [Ingestion]
-      summary: Clone repository to GCS
+      summary: Clone handbook repository to GCS
       description: |
         Clones the GitLab handbook repository and uploads it to Google Cloud Storage.
-        This is typically a one-time setup operation.
-      operationId: cloneToGcs
+        This is typically a one-time setup operation for the handbook source.
+      operationId: cloneHandbook
       security:
         - cloudIdentity: []
       responses:
@@ -146,6 +168,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CloneResponse'
+        '400':
+          description: GCS not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '500':
           description: Clone operation failed
           content:
@@ -156,27 +184,59 @@ paths:
   /ingest:
     post:
       tags: [Ingestion]
-      summary: Trigger parallel ingestion
+      summary: Start ingestion job
       description: |
-        Initiates the ingestion pipeline. Files are divided into batches and
-        processed in parallel via Cloud Tasks.
-      operationId: triggerIngestion
+        Creates an ingestion job for the specified source. Returns immediately with a job_id
+        for status tracking. The actual processing runs in the background.
+
+        **Supported Sources:**
+        - `handbook` - GitLab handbook (Markdown files)
+        - `dnd` - D&D materials (Markdown, PDF, text files)
+        - `personal` - Personal documents (Markdown, PDF, text, Word files)
+
+        **Supported File Formats:**
+        - `.md`, `.markdown`, `.mdown` - Markdown with YAML frontmatter
+        - `.pdf` - PDF documents (via PyMuPDF)
+        - `.txt` - Plain text files
+        - `.docx` - Word documents (via python-docx)
+      operationId: startIngestion
       security:
         - cloudIdentity: []
       requestBody:
+        required: true
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/IngestRequest'
+            examples:
+              handbook:
+                summary: Ingest handbook
+                value:
+                  source: handbook
+              dndForce:
+                summary: Force re-ingest D&D materials
+                value:
+                  source: dnd
+                  force: true
+              personal:
+                summary: Ingest personal documents
+                value:
+                  source: personal
       responses:
         '202':
-          description: Ingestion started
+          description: Job created and processing started
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/IngestResponse'
+        '400':
+          description: Invalid or missing source parameter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '500':
-          description: Failed to start ingestion
+          description: Failed to create job
           content:
             application/json:
               schema:
@@ -188,8 +248,9 @@ paths:
       summary: Process file batch
       description: |
         Processes a specific batch of files. Called by Cloud Tasks for parallel processing.
-        Each batch is processed independently: chunk → embed → store.
-      operationId: ingestBatch
+        Each batch is processed independently and stored to a unique GCS prefix.
+        Use `/merge-batches` to consolidate after all batches complete.
+      operationId: processBatch
       security:
         - cloudIdentity: []
       requestBody:
@@ -201,9 +262,8 @@ paths:
             example:
               start_index: 0
               end_index: 100
-              file_list:
-                - "handbook/engineering/onboarding.md"
-                - "handbook/engineering/code-review.md"
+              collection_name: handbook_documents
+              batch_id: "0_100_abc123"
       responses:
         '200':
           description: Batch processed successfully
@@ -211,8 +271,143 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BatchResponse'
+        '400':
+          description: Missing required parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '500':
           description: Batch processing failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /merge-batches:
+    post:
+      tags: [Ingestion]
+      summary: Merge batch ChromaDBs
+      description: |
+        Consolidates all batch ChromaDB instances into the main collection.
+        Call this endpoint after all batch tasks have completed.
+      operationId: mergeBatches
+      security:
+        - cloudIdentity: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MergeBatchesRequest'
+            example:
+              collection_name: handbook_documents
+              cleanup: true
+      responses:
+        '200':
+          description: Batches merged successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MergeBatchesResponse'
+        '400':
+          description: GCS not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Merge operation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # ============================================================================
+  # Job Management Endpoints
+  # ============================================================================
+  /jobs:
+    get:
+      tags: [Jobs]
+      summary: List ingestion jobs
+      description: |
+        Returns a list of recent ingestion jobs with optional filtering.
+        Jobs are sorted by start time (most recent first).
+      operationId: listJobs
+      security:
+        - cloudIdentity: []
+      parameters:
+        - name: source
+          in: query
+          description: Filter by source name
+          schema:
+            type: string
+            enum: [handbook, dnd, personal]
+        - name: status
+          in: query
+          description: Filter by job status
+          schema:
+            type: string
+            enum: [pending, running, completed, failed]
+        - name: limit
+          in: query
+          description: Maximum number of jobs to return
+          schema:
+            type: integer
+            default: 50
+            maximum: 100
+      responses:
+        '200':
+          description: List of jobs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobListResponse'
+        '500':
+          description: Failed to list jobs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /jobs/{job_id}:
+    get:
+      tags: [Jobs]
+      summary: Get job status
+      description: |
+        Returns the current status of an ingestion job including progress statistics.
+      operationId: getJobStatus
+      security:
+        - cloudIdentity: []
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          description: Job identifier (UUID)
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Job details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+        '400':
+          description: Missing job_id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Job not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Failed to get job status
           content:
             application/json:
               schema:
@@ -232,8 +427,8 @@ components:
       properties:
         status:
           type: string
-          enum: [ok, error]
-          example: ok
+          enum: [ok, healthy, unhealthy]
+          example: healthy
 
     DetailedHealthResponse:
       type: object
@@ -281,10 +476,12 @@ components:
     ErrorResponse:
       type: object
       properties:
-        error:
+        status:
           type: string
-        detail:
+          example: error
+        message:
           type: string
+          example: "Description of the error"
 
     CloneResponse:
       type: object
@@ -301,36 +498,40 @@ components:
 
     IngestRequest:
       type: object
+      required: [source]
       properties:
+        source:
+          type: string
+          enum: [handbook, dnd, personal]
+          description: Source identifier
         force:
           type: boolean
           default: false
-          description: Force re-ingestion of all files
-        batch_size:
-          type: integer
-          default: 100
-          description: Files per batch task
+          description: Force full re-ingestion (ignores incremental updates)
 
     IngestResponse:
       type: object
       properties:
         status:
           type: string
-          example: started
-        total_files:
-          type: integer
-          example: 1000
-        batches_created:
-          type: integer
-          example: 10
-        task_ids:
-          type: array
-          items:
-            type: string
+          example: accepted
+        job_id:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        source:
+          type: string
+          example: handbook
+        collection_name:
+          type: string
+          example: handbook_documents
+        message:
+          type: string
+          example: "Ingestion job created. Use GET /jobs/{job_id} to check status."
 
     BatchRequest:
       type: object
-      required: [start_index, end_index, file_list]
+      required: [start_index, end_index]
       properties:
         start_index:
           type: integer
@@ -342,14 +543,27 @@ components:
           type: array
           items:
             type: string
-          description: List of file paths to process
+          description: Optional list of specific file paths to process
+        collection_name:
+          type: string
+          default: handbook_documents
+          description: Target collection name
+        batch_id:
+          type: string
+          description: Unique batch identifier (auto-generated if not provided)
 
     BatchResponse:
       type: object
       properties:
         status:
           type: string
-          example: completed
+          example: success
+        batch_id:
+          type: string
+          example: "0_100_abc123"
+        gcs_prefix:
+          type: string
+          example: "chroma_db_batch_handbook_documents_0_100_abc123"
         files_processed:
           type: integer
         chunks_created:
@@ -363,3 +577,98 @@ components:
                 type: string
               error:
                 type: string
+
+    MergeBatchesRequest:
+      type: object
+      properties:
+        collection_name:
+          type: string
+          default: handbook_documents
+          description: Collection to merge batches into
+        cleanup:
+          type: boolean
+          default: true
+          description: Delete batch prefixes from GCS after merging
+
+    MergeBatchesResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: success
+        collection_name:
+          type: string
+          example: handbook_documents
+        batches_merged:
+          type: integer
+          example: 10
+        total_documents:
+          type: integer
+          example: 5000
+        batches_cleaned:
+          type: integer
+          example: 10
+        final_gcs_prefix:
+          type: string
+          example: "chroma_db_handbook_documents"
+
+    JobStats:
+      type: object
+      properties:
+        total_files:
+          type: integer
+          example: 1000
+        processed_files:
+          type: integer
+          example: 950
+        failed_files:
+          type: integer
+          example: 5
+        total_chunks:
+          type: integer
+          example: 5000
+        total_documents:
+          type: integer
+          example: 4500
+
+    Job:
+      type: object
+      properties:
+        job_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, running, completed, failed]
+        source:
+          type: string
+          enum: [handbook, dnd, personal]
+        collection_name:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        stats:
+          $ref: '#/components/schemas/JobStats'
+        error:
+          type: string
+          nullable: true
+          description: Error message if status is 'failed'
+
+    JobListResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: success
+        jobs:
+          type: array
+          items:
+            $ref: '#/components/schemas/Job'
+        count:
+          type: integer
+          example: 10

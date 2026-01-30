@@ -15,9 +15,11 @@ from pathlib import Path
 import shutil
 from typing import Any
 
-from thoth.ingestion.chunker import Chunk, MarkdownChunker
+from thoth.ingestion.chunker import Chunk, DocumentChunker, MarkdownChunker
 from thoth.ingestion.gcs_repo_sync import GCSRepoSync
+from thoth.ingestion.parsers import ParserFactory
 from thoth.ingestion.repo_manager import HandbookRepoManager
+from thoth.ingestion.sources.config import SourceConfig
 from thoth.shared.embedder import Embedder
 from thoth.shared.vector_store import VectorStore
 
@@ -109,6 +111,8 @@ class IngestionPipeline:
         state_file: Path | None = None,
         batch_size: int = DEFAULT_BATCH_SIZE,
         logger_instance: logging.Logger | None = None,
+        collection_name: str = "thoth_documents",
+        source_config: SourceConfig | None = None,
     ):
         """Initialize the ingestion pipeline.
 
@@ -120,10 +124,17 @@ class IngestionPipeline:
             state_file: Path to state file for resume capability
             batch_size: Number of files to process in each batch
             logger_instance: Logger instance for logging
+            collection_name: Name of the ChromaDB collection to use
+            source_config: Source configuration for multi-source support
         """
         self.repo_manager = repo_manager or HandbookRepoManager()
         self.chunker = chunker or MarkdownChunker()
+        self.document_chunker = DocumentChunker()  # Generalized chunker for all formats
         self.embedder = embedder or Embedder()
+        self.source_config = source_config
+        # Use collection name from source config if provided
+        self.collection_name = source_config.collection_name if source_config else collection_name
+        self.source_name = source_config.name if source_config else ""
 
         # Initialize GCS repo sync if in Cloud Run environment
         self.gcs_repo_sync = None
@@ -148,12 +159,13 @@ class IngestionPipeline:
                 logger.info(f"Cloud Run detected - using GCS bucket: {gcs_bucket}")
                 self.vector_store = VectorStore(
                     persist_directory="/tmp/chroma_db",  # nosec B108 - Cloud Run requires /tmp
+                    collection_name=collection_name,
                     gcs_bucket_name=gcs_bucket,
                     gcs_project_id=gcs_project,
                 )
             else:
                 # Local: use default chroma_db directory
-                self.vector_store = VectorStore()
+                self.vector_store = VectorStore(collection_name=collection_name)
         else:
             self.vector_store = vector_store
 
@@ -219,6 +231,40 @@ class IngestionPipeline:
         markdown_files = list(repo_path.rglob("*.md"))
         self.logger.info("Found %d markdown files", len(markdown_files))
         return markdown_files
+
+    def _discover_source_files(self, source_path: Path) -> list[Path]:
+        """Discover all supported files for the configured source.
+
+        This method discovers files based on the source_config's supported formats.
+        If no source_config is set, falls back to markdown-only discovery.
+
+        Args:
+            source_path: Path to search for files
+
+        Returns:
+            List of file paths matching supported formats
+        """
+        if not self.source_config:
+            # Fallback to markdown-only for backward compatibility
+            return self._discover_markdown_files(source_path)
+
+        self.logger.info(
+            "Discovering files in %s for source '%s' (formats: %s)",
+            source_path,
+            self.source_config.name,
+            self.source_config.supported_formats,
+        )
+
+        all_files: list[Path] = []
+        for ext in self.source_config.supported_formats:
+            # Remove leading dot if present for glob pattern
+            pattern = f"*{ext}" if ext.startswith(".") else f"*.{ext}"
+            files = list(source_path.rglob(pattern))
+            all_files.extend(files)
+            self.logger.debug("Found %d %s files", len(files), ext)
+
+        self.logger.info("Found %d total files for source '%s'", len(all_files), self.source_config.name)
+        return all_files
 
     def get_file_list(self) -> list[str]:
         """Get list of all markdown files for batch processing.
@@ -330,10 +376,16 @@ class IngestionPipeline:
         return stats
 
     def _process_file(self, file_path: Path) -> list[Chunk]:
-        """Process a single markdown file into chunks.
+        """Process a single file into chunks.
+
+        Supports multiple file formats through the parser system:
+        - Markdown (.md) - uses MarkdownChunker for structure-aware chunking
+        - PDF (.pdf) - extracts text with page markers
+        - Text (.txt) - simple text extraction
+        - Word (.docx) - extracts paragraphs and tables
 
         Args:
-            file_path: Path to the markdown file
+            file_path: Path to the file
 
         Returns:
             List of chunks from the file
@@ -344,7 +396,29 @@ class IngestionPipeline:
         self.logger.debug("Processing file: %s", file_path)
 
         try:
-            chunks = self.chunker.chunk_file(file_path)
+            # Determine if we should use the new parser system
+            extension = file_path.suffix.lower()
+
+            if extension in [".md", ".markdown", ".mdown"]:
+                # Use existing markdown chunker for backward compatibility
+                chunks = self.chunker.chunk_file(file_path)
+                # Add source and format metadata
+                for chunk in chunks:
+                    chunk.metadata.source = self.source_name
+                    chunk.metadata.format = "markdown"
+            elif ParserFactory.can_parse(file_path):
+                # Use parser system for other formats
+                parsed_doc = ParserFactory.parse(file_path)
+                chunks = self.document_chunker.chunk_document(
+                    content=parsed_doc.content,
+                    source_path=str(file_path),
+                    source=self.source_name,
+                    doc_format=parsed_doc.format,
+                )
+            else:
+                self.logger.warning("No parser available for %s, skipping", file_path)
+                return []
+
             self.logger.debug("Generated %d chunks from %s", len(chunks), file_path)
             return chunks
         except Exception:

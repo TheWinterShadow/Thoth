@@ -1,14 +1,16 @@
 # Ingestion Pipeline Architecture
 
-This document describes the data ingestion pipeline that processes GitLab handbook repositories into searchable vector embeddings.
+This document describes the data ingestion pipeline that processes documents from multiple sources into searchable vector embeddings.
 
 ## Overview
 
 The ingestion pipeline is responsible for:
-1. Cloning/syncing GitLab repositories to GCS
-2. Chunking markdown documents into semantic segments
-3. Generating embeddings using sentence-transformers
-4. Storing vectors in ChromaDB for semantic search
+1. Managing multiple document sources (handbook, D&D, personal)
+2. Parsing multiple file formats (Markdown, PDF, text, Word)
+3. Chunking documents into semantic segments
+4. Generating embeddings using sentence-transformers
+5. Storing vectors in ChromaDB collections for semantic search
+6. Tracking job progress via Firestore
 
 ## System Architecture
 
@@ -18,13 +20,23 @@ flowchart TB
         GL[GitLab Repository]
         GCS[(Google Cloud Storage)]
         SM[Secret Manager]
+        FS[(Firestore)]
     end
 
     subgraph CloudRun["Cloud Run - Ingestion Worker"]
         W[Worker HTTP Server]
-        RM[Repo Manager]
+        JM[Job Manager]
+        SR[Source Registry]
+        PF[Parser Factory]
         CH[Chunker]
         EM[Embedder]
+    end
+
+    subgraph Parsers["Document Parsers"]
+        MP[Markdown Parser]
+        PP[PDF Parser]
+        TP[Text Parser]
+        DP[DOCX Parser]
     end
 
     subgraph Tasks["Cloud Tasks"]
@@ -32,19 +44,21 @@ flowchart TB
     end
 
     subgraph Storage["Vector Storage"]
-        VS[(ChromaDB)]
+        VS[(ChromaDB Collections)]
     end
 
-    GL -->|clone/pull| RM
-    SM -->|gitlab-token| RM
-    RM -->|raw files| GCS
-    GCS -->|markdown files| CH
+    GL -->|clone| GCS
+    SM -->|gitlab-token| GL
+    GCS -->|files| PF
+    PF --> MP & PP & TP & DP
+    MP & PP & TP & DP -->|parsed docs| CH
     CH -->|chunks| EM
     EM -->|embeddings| VS
     VS -->|backup| GCS
 
-    W -->|/clone-to-gcs| RM
-    W -->|/ingest| Q
+    W -->|/ingest| JM
+    JM -->|create job| FS
+    JM -->|enqueue| Q
     Q -->|/ingest-batch| W
 ```
 
@@ -54,45 +68,105 @@ flowchart TB
 sequenceDiagram
     participant Client
     participant Worker as Ingestion Worker
+    participant Jobs as Firestore
     participant Tasks as Cloud Tasks
-    participant GitLab
     participant GCS
+    participant Parsers as Parser Factory
     participant ChromaDB
 
-    Client->>Worker: POST /clone-to-gcs
-    Worker->>GitLab: Clone repository
-    Worker->>GCS: Upload repository files
-    Worker-->>Client: 200 OK
+    Client->>Worker: POST /ingest {source: "handbook"}
+    Worker->>Jobs: Create job (pending)
+    Worker-->>Client: 202 Accepted {job_id}
+    Worker->>Jobs: Update job (running)
 
-    Client->>Worker: POST /ingest
-    Worker->>Worker: List files, create batches
-    loop For each batch
-        Worker->>Tasks: Enqueue batch task
-    end
-    Worker-->>Client: 202 Accepted
-
-    Tasks->>Worker: POST /ingest-batch {start, end, files}
-    Worker->>GCS: Download batch files
+    Worker->>GCS: List source files
+    Worker->>Parsers: Parse files (MD/PDF/TXT/DOCX)
+    Parsers-->>Worker: Parsed documents
     Worker->>Worker: Chunk documents
     Worker->>Worker: Generate embeddings
     Worker->>ChromaDB: Upsert vectors
-    Worker-->>Tasks: 200 OK
+
+    Worker->>Jobs: Update job (completed)
+    Worker->>GCS: Sync ChromaDB
+
+    Client->>Worker: GET /jobs/{job_id}
+    Worker->>Jobs: Get job status
+    Worker-->>Client: Job status + stats
+```
+
+## Sources
+
+The pipeline supports multiple document sources, each with its own configuration:
+
+| Source | Collection | Formats | Description |
+|--------|------------|---------|-------------|
+| `handbook` | `handbook_documents` | `.md` | GitLab Handbook |
+| `dnd` | `dnd_documents` | `.md`, `.pdf`, `.txt` | D&D materials |
+| `personal` | `personal_documents` | `.md`, `.pdf`, `.txt`, `.docx` | Personal documents |
+
+### Source Configuration (`thoth/ingestion/sources/config.py`)
+
+```python
+@dataclass
+class SourceConfig:
+    name: str                    # "handbook", "dnd", "personal"
+    collection_name: str         # "handbook_documents"
+    gcs_prefix: str              # Where files are stored in GCS
+    supported_formats: list[str] # [".md", ".pdf", ".txt", ".docx"]
+    description: str
 ```
 
 ## Components
 
-### Repository Manager (`thoth/ingestion/repo_manager.py`)
+### Document Parsers (`thoth/ingestion/parsers/`)
 
-Handles GitLab repository operations:
+The parser factory selects the appropriate parser based on file extension:
 
-| Method | Description |
-|--------|-------------|
-| `clone_handbook()` | Initial clone of handbook repository |
-| `update_repository()` | Pull latest changes |
-| `get_changed_files()` | Detect files changed since last sync |
-| `get_all_markdown_files()` | List all `.md` files in repository |
+```mermaid
+flowchart LR
+    F[File] --> PF[Parser Factory]
+    PF -->|.md| MP[Markdown Parser]
+    PF -->|.pdf| PP[PDF Parser]
+    PF -->|.txt| TP[Text Parser]
+    PF -->|.docx| DP[DOCX Parser]
+    MP & PP & TP & DP --> PD[Parsed Document]
+```
 
-### Markdown Chunker (`thoth/ingestion/chunker.py`)
+| Parser | Extensions | Features |
+|--------|------------|----------|
+| `MarkdownParser` | `.md`, `.markdown`, `.mdown` | YAML frontmatter extraction |
+| `PDFParser` | `.pdf` | PyMuPDF text extraction, page numbers |
+| `TextParser` | `.txt` | UTF-8/latin-1 encoding support |
+| `DocxParser` | `.docx` | Paragraph and table extraction |
+
+### Job Manager (`thoth/ingestion/job_manager.py`)
+
+Tracks ingestion jobs in Firestore:
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending: Create job
+    pending --> running: Start processing
+    running --> completed: Success
+    running --> failed: Error
+    completed --> [*]
+    failed --> [*]
+```
+
+**Firestore Collection**: `thoth_jobs`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `job_id` | string | UUID identifier |
+| `status` | enum | pending, running, completed, failed |
+| `source` | string | Source name (handbook, dnd, personal) |
+| `collection_name` | string | Target ChromaDB collection |
+| `started_at` | timestamp | Job start time |
+| `completed_at` | timestamp | Job completion time |
+| `stats` | object | Processing statistics |
+| `error` | string | Error message if failed |
+
+### Document Chunker (`thoth/ingestion/chunker.py`)
 
 Splits documents into semantic chunks:
 
@@ -100,16 +174,6 @@ Splits documents into semantic chunks:
 - **Overlap**: 50 tokens between chunks
 - **Strategy**: Respects markdown structure (headers, code blocks)
 - **Metadata**: Preserves file path, section hierarchy, line numbers
-
-```mermaid
-flowchart LR
-    MD[Markdown File] --> P[Parser]
-    P --> S[Section Splitter]
-    S --> T[Token Counter]
-    T --> C[Chunk Generator]
-    C --> M[Metadata Enricher]
-    M --> O[Chunks + Metadata]
-```
 
 ### Embedder (`thoth/shared/embedder.py`)
 
@@ -125,14 +189,73 @@ Cloud Run service endpoints:
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/health` | GET/POST | Health check |
-| `/clone-to-gcs` | POST | One-time repository clone |
-| `/ingest` | POST | Trigger parallel batch ingestion |
+| `/health` | GET | Health check |
+| `/clone-handbook` | POST | Clone GitLab handbook to GCS |
+| `/ingest` | POST | Start ingestion job (returns job_id) |
 | `/ingest-batch` | POST | Process specific file batch |
+| `/merge-batches` | POST | Consolidate batch ChromaDBs |
+| `/jobs` | GET | List jobs (with filtering) |
+| `/jobs/{job_id}` | GET | Get job status |
+
+## API Usage
+
+### Starting an Ingestion Job
+
+```bash
+# Start ingestion for a source
+curl -X POST https://worker-url/ingest \
+  -H "Authorization: Bearer $(gcloud auth print-identity-token)" \
+  -H "Content-Type: application/json" \
+  -d '{"source": "handbook"}'
+
+# Response
+{
+  "status": "accepted",
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "source": "handbook",
+  "collection_name": "handbook_documents",
+  "message": "Ingestion job created. Use GET /jobs/{job_id} to check status."
+}
+```
+
+### Checking Job Status
+
+```bash
+curl https://worker-url/jobs/550e8400-e29b-41d4-a716-446655440000 \
+  -H "Authorization: Bearer $(gcloud auth print-identity-token)"
+
+# Response
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "running",
+  "source": "handbook",
+  "collection_name": "handbook_documents",
+  "started_at": "2024-01-15T10:00:00Z",
+  "stats": {
+    "total_files": 1500,
+    "processed_files": 750,
+    "failed_files": 2,
+    "total_chunks": 3500,
+    "total_documents": 3400
+  }
+}
+```
+
+### Listing Jobs
+
+```bash
+# List all jobs
+curl "https://worker-url/jobs" \
+  -H "Authorization: Bearer $(gcloud auth print-identity-token)"
+
+# Filter by source and status
+curl "https://worker-url/jobs?source=handbook&status=completed&limit=10" \
+  -H "Authorization: Bearer $(gcloud auth print-identity-token)"
+```
 
 ## Parallel Processing
 
-The pipeline uses Cloud Tasks for parallel processing:
+For large ingestion jobs, the pipeline uses Cloud Tasks for parallel processing:
 
 ```mermaid
 flowchart TB
@@ -166,31 +289,16 @@ flowchart TB
 - Dispatch rate: 5 tasks/second
 - Retry policy: 3 attempts with exponential backoff (10-60s)
 
-## State Management
-
-The pipeline tracks state for resumability:
-
-```python
-@dataclass
-class PipelineState:
-    last_commit: str          # Last processed commit SHA
-    processed_files: set      # Files already processed
-    failed_files: set         # Files that failed processing
-    total_chunks: int         # Total chunks created
-    last_run: datetime        # Timestamp of last run
-```
-
-State is persisted to GCS for recovery across restarts.
-
 ## Configuration
 
 Environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `GCP_PROJECT_ID` | - | GCP project for Firestore/GCS |
+| `GCS_BUCKET_NAME` | - | GCS bucket for storage |
 | `GITLAB_BASE_URL` | `https://gitlab.com` | GitLab instance URL |
 | `HANDBOOK_REPO` | - | Repository path (e.g., `group/handbook`) |
-| `GCS_BUCKET` | - | GCS bucket for storage |
 | `CHUNK_SIZE` | `800` | Target chunk size in tokens |
 | `CHUNK_OVERLAP` | `50` | Overlap between chunks |
 | `BATCH_SIZE` | `100` | Files per batch task |

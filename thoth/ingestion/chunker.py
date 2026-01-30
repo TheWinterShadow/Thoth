@@ -1,16 +1,17 @@
-"""Markdown-aware chunking for handbook content.
+"""Document chunking for multi-format ingestion.
 
-This module provides intelligent chunking of markdown files that:
-- Respects markdown structure (headers, lists, code blocks)
+This module provides intelligent chunking of documents that:
+- Respects document structure (headers, paragraphs, sections)
 - Maintains context through overlapping chunks
 - Extracts metadata for each chunk
 - Produces appropriately sized chunks (500-1000 tokens)
+- Supports multiple formats via DocumentChunker
 
 Research findings and strategy:
 - Chunk size: 500-1000 tokens (balances context and granularity)
 - Overlap: 100-200 tokens (ensures context continuity)
-- Structure preservation: Split at header boundaries when possible
-- Metadata: File path, header hierarchy, timestamps, chunk IDs
+- Structure preservation: Split at header/paragraph boundaries when possible
+- Metadata: File path, header hierarchy, timestamps, chunk IDs, source, format
 """
 
 from dataclasses import dataclass, field
@@ -50,6 +51,8 @@ class ChunkMetadata:
     timestamp: str = field(default_factory=lambda: datetime.now().astimezone().isoformat())
     overlap_with_previous: bool = False
     overlap_with_next: bool = False
+    source: str = ""  # Source identifier (e.g., 'handbook', 'dnd', 'personal')
+    format: str = ""  # Document format (e.g., 'markdown', 'pdf', 'text', 'docx')
 
     def to_dict(self) -> dict[str, Any]:
         """Convert metadata to dictionary.
@@ -83,6 +86,8 @@ class ChunkMetadata:
             "timestamp": self.timestamp,
             "overlap_with_previous": self.overlap_with_previous,
             "overlap_with_next": self.overlap_with_next,
+            "source": self.source,
+            "format": self.format,
         }
 
         # Sanitize all values to ensure ChromaDB compatibility
@@ -488,6 +493,296 @@ class MarkdownChunker:
             Unique chunk ID
         """
         # Create hash from file path, index, and content snippet
+        hash_input = f"{file_path}:{index}:{content[:100]}"
+        hash_digest = hashlib.sha256(hash_input.encode()).hexdigest()
+        return f"chunk_{index}_{hash_digest[:8]}"
+
+
+class DocumentChunker:
+    """Generalized document chunker for multi-format support.
+
+    This chunker uses MarkdownChunker for markdown files and provides
+    generic paragraph-based chunking for other formats (PDF, text, docx).
+
+    Example:
+        >>> from thoth.ingestion.parsers import ParserFactory
+        >>> chunker = DocumentChunker()
+        >>> parsed_doc = ParserFactory.parse(Path("document.pdf"))
+        >>> chunks = chunker.chunk_document(parsed_doc, source="dnd")
+    """
+
+    def __init__(
+        self,
+        min_chunk_size: int = DEFAULT_MIN_CHUNK_SIZE,
+        max_chunk_size: int = DEFAULT_MAX_CHUNK_SIZE,
+        overlap_size: int = DEFAULT_OVERLAP_SIZE,
+        logger: logging.Logger | None = None,
+    ):
+        """Initialize the document chunker.
+
+        Args:
+            min_chunk_size: Minimum chunk size in tokens
+            max_chunk_size: Maximum chunk size in tokens
+            overlap_size: Number of tokens to overlap between chunks
+            logger: Logger instance
+        """
+        self.min_chunk_size = min_chunk_size
+        self.max_chunk_size = max_chunk_size
+        self.overlap_size = overlap_size
+        self.logger = logger or logging.getLogger(__name__)
+
+        # Use MarkdownChunker for markdown-specific processing
+        self._markdown_chunker = MarkdownChunker(
+            min_chunk_size=min_chunk_size,
+            max_chunk_size=max_chunk_size,
+            overlap_size=overlap_size,
+            logger=self.logger,
+        )
+
+    def chunk_document(
+        self,
+        content: str,
+        source_path: str,
+        source: str = "",
+        doc_format: str = "",
+    ) -> list[Chunk]:
+        """Chunk a document based on its format.
+
+        Args:
+            content: Document text content
+            source_path: Source file path for metadata
+            source: Source identifier (e.g., 'handbook', 'dnd')
+            doc_format: Document format (e.g., 'markdown', 'pdf', 'text', 'docx')
+
+        Returns:
+            List of chunks with metadata including source and format
+        """
+        if not content.strip():
+            return []
+
+        # Use markdown-aware chunking for markdown format
+        if doc_format == "markdown":
+            chunks = self._markdown_chunker.chunk_text(content, source_path)
+        else:
+            # Use generic paragraph-based chunking for other formats
+            chunks = self._chunk_plain_text(content, source_path)
+
+        # Add source and format to all chunk metadata
+        for chunk in chunks:
+            chunk.metadata.source = source
+            chunk.metadata.format = doc_format
+
+        return chunks
+
+    def chunk_file(self, file_path: Path, source: str = "", doc_format: str = "markdown") -> list[Chunk]:
+        """Chunk a file directly (for backward compatibility).
+
+        Args:
+            file_path: Path to the file
+            source: Source identifier
+            doc_format: Document format
+
+        Returns:
+            List of chunks with metadata
+        """
+        if not file_path.exists():
+            raise FileNotFoundError(MSG_INVALID_FILE.format(path=file_path))
+
+        content = file_path.read_text(encoding="utf-8")
+        return self.chunk_document(content, str(file_path), source, doc_format)
+
+    def _chunk_plain_text(self, text: str, source_path: str) -> list[Chunk]:
+        """Chunk plain text by paragraphs.
+
+        This is used for non-markdown formats (PDF, text, docx).
+
+        Args:
+            text: Plain text content
+            source_path: Source file path for metadata
+
+        Returns:
+            List of chunks
+        """
+        # Split by double newlines (paragraphs) or page markers
+        paragraphs = re.split(r"\n\n+|\[Page \d+\]\n", text)
+        paragraphs = [p.strip() for p in paragraphs if p.strip()]
+
+        if not paragraphs:
+            return []
+
+        # Group paragraphs into chunks
+        chunk_groups = self._group_paragraphs(paragraphs)
+
+        # Create chunks with metadata
+        chunks = []
+        total_chunks = len(chunk_groups)
+
+        for idx, para_group in enumerate(chunk_groups):
+            content = "\n\n".join(para_group)
+            token_count = self._estimate_tokens(content)
+            chunk_id = self._generate_chunk_id(source_path, idx, content)
+
+            metadata = ChunkMetadata(
+                chunk_id=chunk_id,
+                file_path=source_path,
+                chunk_index=idx,
+                total_chunks=total_chunks,
+                headers=[],  # Non-markdown formats don't have headers
+                token_count=token_count,
+                char_count=len(content),
+            )
+
+            chunks.append(Chunk(content=content, metadata=metadata))
+
+        # Add overlaps
+        return self._add_overlaps(chunks)
+
+    def _group_paragraphs(self, paragraphs: list[str]) -> list[list[str]]:
+        """Group paragraphs into appropriately sized chunks.
+
+        Args:
+            paragraphs: List of paragraphs
+
+        Returns:
+            List of paragraph groups
+        """
+        groups: list[list[str]] = []
+        current_group: list[str] = []
+        current_tokens = 0
+
+        for para in paragraphs:
+            para_tokens = self._estimate_tokens(para)
+
+            # If paragraph alone exceeds max size, split it
+            if para_tokens > self.max_chunk_size:
+                if current_group:
+                    groups.append(current_group)
+                    current_group = []
+                    current_tokens = 0
+
+                # Split large paragraph by sentences
+                split_paras = self._split_large_paragraph(para)
+                groups.extend([[sp] for sp in split_paras])
+                continue
+
+            # Check if adding this paragraph exceeds max size
+            if current_tokens + para_tokens > self.max_chunk_size:
+                if current_tokens >= self.min_chunk_size:
+                    groups.append(current_group)
+                    current_group = [para]
+                    current_tokens = para_tokens
+                else:
+                    current_group.append(para)
+                    current_tokens += para_tokens
+            else:
+                current_group.append(para)
+                current_tokens += para_tokens
+
+        if current_group:
+            groups.append(current_group)
+
+        return groups
+
+    def _split_large_paragraph(self, paragraph: str) -> list[str]:
+        """Split a large paragraph by sentences.
+
+        Args:
+            paragraph: Large paragraph to split
+
+        Returns:
+            List of smaller text segments
+        """
+        # Simple sentence splitting
+        sentences = re.split(r"(?<=[.!?])\s+", paragraph)
+        segments: list[str] = []
+        current_segment: list[str] = []
+        current_tokens = 0
+
+        for sentence in sentences:
+            sentence_tokens = self._estimate_tokens(sentence)
+
+            if current_tokens + sentence_tokens > self.max_chunk_size and current_segment:
+                segments.append(" ".join(current_segment))
+                current_segment = [sentence]
+                current_tokens = sentence_tokens
+            else:
+                current_segment.append(sentence)
+                current_tokens += sentence_tokens
+
+        if current_segment:
+            segments.append(" ".join(current_segment))
+
+        return segments
+
+    def _add_overlaps(self, chunks: list[Chunk]) -> list[Chunk]:
+        """Add overlapping content between chunks.
+
+        Args:
+            chunks: List of chunks
+
+        Returns:
+            List of chunks with overlaps
+        """
+        if len(chunks) <= 1:
+            return chunks
+
+        overlapped_chunks = []
+
+        for i, chunk in enumerate(chunks):
+            content = chunk.content
+            metadata = chunk.metadata
+
+            # Add overlap from previous chunk
+            if i > 0:
+                prev_content = chunks[i - 1].content
+                overlap = self._get_overlap_text(prev_content)
+                if overlap:
+                    content = overlap + "\n\n" + content
+                    metadata.overlap_with_previous = True
+
+            # Mark overlap with next
+            if i < len(chunks) - 1:
+                metadata.overlap_with_next = True
+
+            # Update counts
+            metadata.token_count = self._estimate_tokens(content)
+            metadata.char_count = len(content)
+
+            overlapped_chunks.append(Chunk(content=content, metadata=metadata))
+
+        return overlapped_chunks
+
+    def _get_overlap_text(self, text: str) -> str:
+        """Extract overlap text from the end of content.
+
+        Args:
+            text: Text to extract overlap from
+
+        Returns:
+            Overlap text
+        """
+        target_tokens = self.overlap_size
+        lines = text.split("\n")
+        lines = list(reversed(lines))
+
+        overlap_lines: list[str] = []
+        current_tokens = 0
+
+        for line in lines:
+            line_tokens = self._estimate_tokens(line)
+            if current_tokens + line_tokens > target_tokens and overlap_lines:
+                break
+            overlap_lines.append(line)
+            current_tokens += line_tokens
+
+        return "\n".join(reversed(overlap_lines))
+
+    def _estimate_tokens(self, text: str) -> int:
+        """Estimate token count for text."""
+        return int(len(text) * APPROX_TOKENS_PER_CHAR)
+
+    def _generate_chunk_id(self, file_path: str, index: int, content: str) -> str:
+        """Generate unique ID for a chunk."""
         hash_input = f"{file_path}:{index}:{content[:100]}"
         hash_digest = hashlib.sha256(hash_input.encode()).hexdigest()
         return f"chunk_{index}_{hash_digest[:8]}"
