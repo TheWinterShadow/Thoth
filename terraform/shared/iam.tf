@@ -167,6 +167,31 @@ resource "google_project_iam_member" "thoth_cloudtasks_enqueuer" {
   member  = "serviceAccount:${google_service_account.thoth_mcp.email}"
 }
 
+# Grant IAM Management Permissions
+# Custom role with minimal permissions for Terraform to manage Cloud Run IAM
+resource "google_project_iam_custom_role" "terraform_cloudrun_iam" {
+  role_id     = "terraformCloudRunIAM"
+  title       = "Terraform Cloud Run IAM Manager"
+  description = "Minimal permissions for Terraform to manage IAM policies on Cloud Run services"
+  
+  permissions = [
+    "run.services.getIamPolicy",
+    "run.services.setIamPolicy",
+  ]
+  
+  stage = "GA"
+}
+
+# Grant the custom role to Terraform service account
+resource "google_project_iam_member" "terraform_cloudrun_iam_manager" {
+  project = var.project_id
+  role    = google_project_iam_custom_role.terraform_cloudrun_iam.id
+  member  = "serviceAccount:${google_service_account.thoth_mcp.email}"
+  
+  depends_on = [google_project_service.required_apis]
+}
+
+
 # Note: roles/iam.serviceAccountUser is managed via gcloud (TF Cloud lacks setIamPolicy permission)
 # gcloud iam service-accounts add-iam-policy-binding thoth-mcp-sa@PROJECT.iam.gserviceaccount.com \
 #   --member="serviceAccount:thoth-mcp-sa@PROJECT.iam.gserviceaccount.com" \
