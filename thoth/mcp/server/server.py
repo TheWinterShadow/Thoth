@@ -1083,8 +1083,8 @@ class ThothMCPServer:
         return Starlette(
             debug=True,
             routes=[
-                Route("/sse", endpoint=handle_sse),
-                Route("/messages", endpoint=handle_messages, methods=["POST"]),
+                Route("/sse", handle_sse),
+                Route("/messages", handle_messages, methods=["POST"]),
             ],
         )
 
