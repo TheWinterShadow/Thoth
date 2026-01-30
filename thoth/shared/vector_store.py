@@ -132,15 +132,15 @@ class VectorStore:
             logger.info(f"Generating embeddings for {len(documents)} documents")
             embeddings = self.embedder.embed(documents, show_progress=True)
 
-        # Add documents to collection
-        self.collection.add(
+        # Upsert documents to collection (add or update if ID exists)
+        self.collection.upsert(
             documents=documents,
             metadatas=metadatas,  # type: ignore[arg-type]
             ids=ids,
             embeddings=embeddings,  # type: ignore[arg-type]
         )
 
-        logger.info(f"Added {len(documents)} documents to collection")
+        logger.info(f"Upserted {len(documents)} documents to collection")
 
     def search_similar(
         self,
