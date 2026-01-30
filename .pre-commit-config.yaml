@@ -81,8 +81,9 @@ repos:
         name: pytest
         entry: hatch test
         language: system
+        types:
+          - python
         pass_filenames: false
-        always_run: true
 
 # CI configuration
 ci:
