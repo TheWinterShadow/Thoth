@@ -1,7 +1,7 @@
-thoth.mcp\_server
-=================
+thoth.mcp.server
+================
 
-.. automodule:: thoth.mcp_server
+.. automodule:: thoth.mcp.server
 
    
    .. rubric:: Functions

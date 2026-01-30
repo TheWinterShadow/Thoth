@@ -1,7 +1,7 @@
-thoth.ingestion.embedder
-========================
+thoth.shared.embedder
+=====================
 
-.. automodule:: thoth.ingestion.embedder
+.. automodule:: thoth.shared.embedder
 
    
    .. rubric:: Classes

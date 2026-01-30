@@ -1,21 +1,13 @@
-Modules Overview
-================
+API Reference
+=============
 
-This section provides detailed API documentation for all Thoth modules.
+This section provides auto-generated API documentation for all Thoth modules.
 
 .. autosummary::
    :toctree: generated
    :recursive:
 
    thoth
-   thoth.ingestion
-   thoth.mcp_server
-   thoth.utils
 
-Main Package
-------------
-
-.. automodule:: thoth
-   :members:
-   :undoc-members:
-   :show-inheritance:
+The API documentation is automatically generated from the source code docstrings.
+For usage examples, see the :doc:`../getting_started` guide.

@@ -29,7 +29,7 @@ The Thoth MCP Server exposes five tools that enable AI assistants (like Claude) 
 ### Server Initialization
 
 ```python
-from thoth.mcp_server.server import ThothMCPServer
+from thoth.mcp.server import ThothMCPServer
 
 server = ThothMCPServer(
     name="my-handbook-server",

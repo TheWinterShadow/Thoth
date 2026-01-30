@@ -1,20 +1,20 @@
-thoth.utils.secrets
+thoth.shared.health
 ===================
 
-.. automodule:: thoth.utils.secrets
+.. automodule:: thoth.shared.health
 
    
    .. rubric:: Functions
 
    .. autosummary::
    
-      get_secret_manager
-      lru_cache
+      health_check_cli
    
    .. rubric:: Classes
 
    .. autosummary::
    
       Any
-      SecretManagerClient
+      HealthCheck
+      Path
    

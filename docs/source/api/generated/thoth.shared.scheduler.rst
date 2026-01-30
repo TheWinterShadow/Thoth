@@ -1,7 +1,7 @@
-thoth.scheduler
-===============
+thoth.shared.scheduler
+======================
 
-.. automodule:: thoth.scheduler
+.. automodule:: thoth.shared.scheduler
 
    
    .. rubric:: Functions

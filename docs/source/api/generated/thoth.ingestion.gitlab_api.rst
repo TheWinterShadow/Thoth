@@ -8,6 +8,7 @@ thoth.ingestion.gitlab\_api
 
    .. autosummary::
    
+      get_secret_manager
       quote
    
    .. rubric:: Classes

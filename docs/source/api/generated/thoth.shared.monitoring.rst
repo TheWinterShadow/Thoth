@@ -1,7 +1,7 @@
-thoth.monitoring
-================
+thoth.shared.monitoring
+=======================
 
-.. automodule:: thoth.monitoring
+.. automodule:: thoth.shared.monitoring
 
    
    .. rubric:: Functions

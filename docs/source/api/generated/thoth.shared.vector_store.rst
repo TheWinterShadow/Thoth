@@ -1,7 +1,7 @@
-thoth.ingestion.vector\_store
-=============================
+thoth.shared.vector\_store
+==========================
 
-.. automodule:: thoth.ingestion.vector_store
+.. automodule:: thoth.shared.vector_store
 
    
    .. rubric:: Classes

@@ -53,11 +53,10 @@ This guide provides information for developers who want to contribute to the Tho
 
 The development environment includes:
 
-- **black**: Code formatting
-- **isort**: Import sorting
-- **flake8**: Linting and style checks
+- **ruff**: Linting, formatting, and import sorting
 - **mypy**: Static type checking
 - **pytest**: Testing framework
+- **pytest-asyncio**: Async test support
 - **coverage**: Test coverage measurement
 - **sphinx**: Documentation generation
 
@@ -74,16 +73,13 @@ The development environment includes:
 
 3. **Run quality checks**:
    ```bash
-   # Format code
-   black thoth/ tests/
-   isort thoth/ tests/
-   
-   # Check linting
-   flake8 thoth/ tests/
-   
+   # Format code and fix linting issues
+   ruff check --fix thoth/ tests/
+   ruff format thoth/ tests/
+
    # Type checking
    mypy thoth/
-   
+
    # Run tests
    pytest
    ```
@@ -218,7 +214,7 @@ from pathlib import Path
 import requests
 
 # Local imports
-from thoth.utils.base import BaseUtility
+from thoth.shared.utils.logger import get_logger
 
 # Constants
 DEFAULT_TIMEOUT = 30
@@ -252,13 +248,21 @@ Use isort to organize imports:
 ```
 tests/
 ├── __init__.py
-├── test_thoth.py           # Main package tests
 ├── conftest.py             # Pytest configuration and fixtures
-└── test_utils/             # Utility tests
+├── test_thoth.py           # Main package tests
+├── ingestion/              # Ingestion module tests
+│   ├── __init__.py
+│   ├── test_chunker.py
+│   ├── test_repo_manager.py
+│   └── test_pipeline.py
+├── mcp/                    # MCP server tests
+│   ├── __init__.py
+│   └── test_server.py
+└── shared/                 # Shared utilities tests
     ├── __init__.py
-    ├── test_text.py        # Text utility tests
-    ├── test_data.py        # Data utility tests
-    └── test_base.py        # Base functionality tests
+    ├── test_embedder.py
+    ├── test_vector_store.py
+    └── test_gcs_sync.py
 ```
 
 ### Writing Tests
@@ -273,35 +277,38 @@ tests/
 
 ```python
 import pytest
-from thoth.utils.text import normalize_whitespace
+from thoth.shared.embedder import Embedder
 
-class TestTextUtilities:
-    """Tests for text utility functions."""
-    
-    def test_normalize_whitespace_basic(self):
-        """Test basic whitespace normalization."""
-        result = normalize_whitespace("  hello   world  ")
-        assert result == "hello world"
-    
-    def test_normalize_whitespace_empty_string(self):
-        """Test normalization of empty string."""
-        result = normalize_whitespace("")
-        assert result == ""
-    
-    def test_normalize_whitespace_invalid_input(self):
-        """Test error handling for invalid input."""
-        with pytest.raises(TypeError):
-            normalize_whitespace(None)
-    
-    @pytest.mark.parametrize("input_text,expected", [
-        ("hello\tworld", "hello world"),
-        ("hello\nworld", "hello world"),
-        ("hello\r\nworld", "hello world"),
+class TestEmbedder:
+    """Tests for the Embedder class."""
+
+    def test_embed_single_document(self):
+        """Test embedding a single document."""
+        embedder = Embedder()
+        embedding = embedder.embed_single("Hello world")
+        assert len(embedding) > 0
+
+    def test_embed_multiple_documents(self):
+        """Test embedding multiple documents."""
+        embedder = Embedder()
+        embeddings = embedder.embed(["Doc 1", "Doc 2"])
+        assert len(embeddings) == 2
+
+    def test_embed_empty_string(self):
+        """Test embedding an empty string."""
+        embedder = Embedder()
+        embedding = embedder.embed_single("")
+        assert len(embedding) > 0  # Still returns embedding
+
+    @pytest.mark.parametrize("text,expected_dim", [
+        ("Short text", 384),
+        ("Longer text with more words", 384),
     ])
-    def test_normalize_whitespace_various_chars(self, input_text, expected):
-        """Test normalization of various whitespace characters."""
-        result = normalize_whitespace(input_text)
-        assert result == expected
+    def test_embedding_dimensions(self, text, expected_dim):
+        """Test embedding dimensions match expected size."""
+        embedder = Embedder()
+        embedding = embedder.embed_single(text)
+        assert len(embedding) == expected_dim
 ```
 
 ### Running Tests
@@ -357,7 +364,7 @@ Use Sphinx autodoc to generate API documentation from docstrings:
 API Reference
 =============
 
-.. automodule:: thoth.utils.text
+.. automodule:: thoth.shared.embedder
    :members:
    :undoc-members:
    :show-inheritance:
@@ -415,7 +422,7 @@ pytest tests/test_specific.py::test_failing_function -v
 #### Type Checking Errors
 ```bash
 # Run mypy on specific file
-mypy thoth/utils/text.py
+mypy thoth/shared/embedder.py
 
 # Ignore specific error (use sparingly)
 # type: ignore[error-code]
@@ -473,25 +480,24 @@ Create `.pre-commit-config.yaml`:
 
 ```yaml
 repos:
-  - repo: https://github.com/psf/black
-    rev: 22.3.0
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.6
     hooks:
-      - id: black
-
-  - repo: https://github.com/pycqa/isort
-    rev: 5.10.1
-    hooks:
-      - id: isort
-
-  - repo: https://github.com/pycqa/flake8
-    rev: 4.0.1
-    hooks:
-      - id: flake8
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
 
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v0.950
+    rev: v1.14.1
     hooks:
       - id: mypy
+        additional_dependencies:
+          - types-requests
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.2
+    hooks:
+      - id: gitleaks
 ```
 
 This development guide should provide everything needed to contribute effectively to the Thoth project. Happy coding!

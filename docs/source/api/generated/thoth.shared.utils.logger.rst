@@ -1,7 +1,7 @@
-thoth.utils.logger
-==================
+thoth.shared.utils.logger
+=========================
 
-.. automodule:: thoth.utils.logger
+.. automodule:: thoth.shared.utils.logger
 
    
    .. rubric:: Functions

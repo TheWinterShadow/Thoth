@@ -1,7 +1,7 @@
-﻿thoth
-=====
+thoth.mcp
+=========
 
-.. automodule:: thoth
+.. automodule:: thoth.mcp
 
    
 .. rubric:: Modules
@@ -10,6 +10,5 @@
    :toctree:
    :recursive:
 
-   ingestion
-   mcp
-   shared
+   http_wrapper
+   server

@@ -29,7 +29,7 @@ Basic Usage
 .. code-block:: python
 
    import thoth
-   from thoth.mcp_server import ThothMCPServer
+   from thoth.mcp.server import ThothMCPServer
    
    # Create an MCP server instance
    server = ThothMCPServer(name="my-server", version="1.0.0")
@@ -45,13 +45,13 @@ To start the Thoth MCP server:
 
 .. code-block:: bash
 
-   python -m thoth.mcp_server.server
+   python -m thoth.mcp.server
 
 Or use the synchronous entry point:
 
 .. code-block:: python
 
-   from thoth.mcp_server import run_server
+   from thoth.mcp.server import run_server
    
    run_server()
 
@@ -91,7 +91,6 @@ The ingestion module provides tools for managing the GitLab handbook repository:
 Next Steps
 ----------
 
-- Explore the :doc:`MCP_TOOLS` documentation
-- Read the :doc:`api/mcp_server` API reference
-- Learn about :doc:`api/ingestion` for repository management
-- Check out :doc:`DEVELOPMENT` for contributing
+- Explore the :doc:`md/MCP_TOOLS` documentation
+- Read the :doc:`api/modules` API reference
+- Check out :doc:`md/DEVELOPMENT` for contributing

@@ -170,7 +170,7 @@ echo '{"jsonrpc":"2.0","method":"initialize","params":{},"id":1}' | gcloud run s
 # Check vector store
 gcloud run services execute thoth-mcp-server \
   --region=us-central1 \
-  --command="python -c 'from thoth.ingestion.vector_store import VectorStore; store = VectorStore(); print(f\"Documents: {store.get_document_count()}\")'"
+  --command="python -c 'from thoth.shared.vector_store import VectorStore; store = VectorStore(); print(f\"Documents: {store.get_document_count()}\")'"
 ```
 
 ## Monitoring
@@ -213,7 +213,7 @@ gcloud alpha monitoring policies create \
 GCS sync is built into the application:
 
 ```python
-from thoth.ingestion.vector_store import VectorStore
+from thoth.shared.vector_store import VectorStore
 
 # Initialize with GCS
 store = VectorStore(
@@ -284,7 +284,7 @@ gcloud projects get-iam-policy thoth-dev-485501 \
 # Test GCS sync
 gcloud run services execute thoth-mcp-server \
   --region=us-central1 \
-  --command="python -c 'from thoth.ingestion.gcs_sync import GCSSync; sync = GCSSync(\"thoth-storage-bucket\"); print(sync.list_backups())'"
+  --command="python -c 'from thoth.shared.gcs_sync import GCSSync; sync = GCSSync(\"thoth-storage-bucket\"); print(sync.list_backups())'"
 ```
 
 ### High Latency

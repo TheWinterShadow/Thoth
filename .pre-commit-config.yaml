@@ -14,8 +14,9 @@
 # For faster commits (skip tests), use:
 #   SKIP=pytest git commit -m "message"
 
-default_stages: [pre-commit]
-minimum_pre_commit_version: '3.0.0'
+default_stages:
+  - pre-commit
+minimum_pre_commit_version: 3.0.0
 
 repos:
 
@@ -26,7 +27,8 @@ repos:
         name: type-check
         entry: hatch run dev:typecheck
         language: system
-        types: [python]
+        types:
+          - python
         require_serial: true
         pass_filenames: false
 
@@ -37,13 +39,15 @@ repos:
         name: ruff-check
         entry: hatch run lint:ruff check --fix
         language: system
-        types: [python]
+        types:
+          - python
         require_serial: true
       - id: ruff-format
         name: ruff-format
         entry: hatch run lint:ruff format
         language: system
-        types: [python]
+        types:
+          - python
         require_serial: true
 
   # mypy - Static type checker (managed by hatch)
@@ -53,7 +57,8 @@ repos:
         name: mypy
         entry: hatch run lint:mypy thoth
         language: system
-        types: [python]
+        types:
+          - python
         require_serial: true
         pass_filenames: false
 
@@ -64,7 +69,8 @@ repos:
         name: bandit
         entry: hatch run lint:bandit -r thoth
         language: system
-        types: [python]
+        types:
+          - python
         require_serial: true
         pass_filenames: false
 
@@ -88,5 +94,7 @@ ci:
   autoupdate_branch: ''
   autoupdate_commit_msg: '[pre-commit.ci] pre-commit autoupdate'
   autoupdate_schedule: weekly
-  skip: [pytest]  # Skip tests in CI (they run separately in GitHub Actions)
+  skip:
+    - pytest
+    # Skip tests in CI (they run separately in GitHub Actions)
   submodules: false

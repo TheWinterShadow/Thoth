@@ -21,11 +21,11 @@ Core Components
 Server Class
 ~~~~~~~~~~~~
 
-The :class:`thoth.mcp_server.server.ThothMCPServer` class is the main entry point:
+The :class:`thoth.mcp.server.server.ThothMCPServer` class is the main entry point:
 
 .. code-block:: python
 
-   from thoth.mcp_server import ThothMCPServer
+   from thoth.mcp.server import ThothMCPServer
    
    server = ThothMCPServer(
        name="my-server",
@@ -45,7 +45,7 @@ The server implements the following MCP protocol handlers:
 Available Tools
 ---------------
 
-See :doc:`../MCP_TOOLS` for complete tool documentation.
+See :doc:`../md/MCP_TOOLS` for complete tool documentation.
 
 Ping Tool
 ~~~~~~~~~
@@ -71,14 +71,14 @@ Command Line
 
 .. code-block:: bash
 
-   python -m thoth.mcp_server.server
+   python -m thoth.mcp.server
 
 Programmatically
 ~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
-   from thoth.mcp_server import run_server
+   from thoth.mcp.server import run_server
    
    run_server()
 
@@ -88,7 +88,7 @@ Async Mode
 .. code-block:: python
 
    import asyncio
-   from thoth.mcp_server import ThothMCPServer
+   from thoth.mcp.server import ThothMCPServer
    
    async def main():
        server = ThothMCPServer()
@@ -158,11 +158,11 @@ Resources can be added similarly through the resource handlers:
 Testing
 -------
 
-See :doc:`../TEST_COVERAGE` for comprehensive testing documentation.
+See :doc:`../md/TEST_COVERAGE` for comprehensive testing documentation.
 
 Further Reading
 ---------------
 
-- :doc:`../MCP_TOOLS` - Available tools documentation
-- :doc:`../api/mcp_server` - API reference
+- :doc:`../md/MCP_TOOLS` - Available tools documentation
+- :doc:`../api/modules` - API reference
 - `Model Context Protocol Specification <https://modelcontextprotocol.io/>`_

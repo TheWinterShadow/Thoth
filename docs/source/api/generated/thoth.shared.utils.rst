@@ -1,7 +1,7 @@
-﻿thoth.utils
-===========
+thoth.shared.utils
+==================
 
-.. automodule:: thoth.utils
+.. automodule:: thoth.shared.utils
 
    
    .. rubric:: Functions

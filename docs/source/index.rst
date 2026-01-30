@@ -1,46 +1,55 @@
-Welcome to Thoth's Documentation!
-==================================
+Welcome to Thoth's Documentation
+=================================
 
-Thoth is a modern Python library providing advanced utilities and tools for developers, 
-including a powerful Model Context Protocol (MCP) server framework.
-
-Named after the ancient Egyptian god of wisdom and writing, Thoth aims to bring clarity 
-and structure to your Python projects through well-designed, modular utilities.
+Thoth is a Model Context Protocol (MCP) server that provides semantic search
+capabilities over handbook documentation for AI assistants like Claude.
 
 .. toctree::
    :maxdepth: 2
-   :caption: User Guide:
+   :caption: Getting Started
 
    getting_started
-   
+   md/ARCHITECTURE
+   md/DEVELOPMENT
 
 .. toctree::
    :maxdepth: 2
-   :caption: MCP Server:
+   :caption: MCP Server
 
    mcp_server/overview
-   MCP_TOOLS
-
+   md/MCP_TOOLS
 
 .. toctree::
    :maxdepth: 2
-   :caption: Development:
+   :caption: Deployment
 
-   ARCHITECTURE
-   DEVELOPMENT
-   TEST_COVERAGE
-   coverage_summary
-
+   md/CLOUD_RUN_DEPLOYMENT
+   md/ENVIRONMENT_CONFIG
+   md/GITHUB_ACTIONS
 
 .. toctree::
-   :maxdepth: 3
-   :caption: API Reference:
+   :maxdepth: 2
+   :caption: Configuration
+
+   md/AUTHENTICATION
+   md/SECRETS_SETUP
+   md/SCHEDULER_SETUP
+   md/TERRAFORM_CLOUD_SETUP
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Internals
+
+   md/EMBEDDING_MODEL
+   md/VECTOR_STORE
+   md/REMOTE_INGESTION
+   md/TEST_COVERAGE
+
+.. toctree::
+   :maxdepth: 2
+   :caption: API Reference
 
    api/modules
-   api/thoth
-   api/ingestion
-   api/mcp_server
-   api/utils
 
 
 Indices and tables

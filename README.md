@@ -77,7 +77,7 @@ if metadata:
 ### Vector Store
 
 ```python
-from thoth.ingestion.vector_store import VectorStore
+from thoth.shared.vector_store import VectorStore
 
 # Initialize the vector store (uses all-MiniLM-L6-v2 by default)
 vector_store = VectorStore(
@@ -134,7 +134,7 @@ results = vector_store.search_similar(
 ### Embedding Generation
 
 ```python
-from thoth.ingestion.embedder import Embedder
+from thoth.shared.embedder import Embedder
 
 # Initialize embedder with default model (all-MiniLM-L6-v2)
 embedder = Embedder()
@@ -158,14 +158,18 @@ embeddings = high_quality_embedder.embed(texts)
 ### MCP Server
 
 ```python
-import thoth
-from thoth.utils import (
-    # Utility functions will be available here
-    # as the project develops
-)
+import asyncio
+from thoth.mcp.server import ThothMCPServer
 
-# Example usage will be added as features are implemented
-print(f"Thoth v{thoth.__version__} - Ready to enhance your Python experience!")
+# Create and run the MCP server
+async def main():
+    server = ThothMCPServer(
+        name="my-handbook-server",
+        version="1.0.0"
+    )
+    await server.run()
+
+asyncio.run(main())
 ```
 
 ## 🏗️ Project Architecture
@@ -432,23 +436,29 @@ sequenceDiagram
 thoth/                              # Main application package
 ├── __init__.py                     # Package entry point
 ├── __about__.py                    # Version and metadata
-├── cli.py                          # CLI commands (ingest, search, schedule)
-├── health.py                       # Health check for Cloud Run
-├── http_wrapper.py                 # HTTP/SSE wrapper for Cloud Run
-├── scheduler.py                    # APScheduler for automated syncs
-├── monitoring.py                   # Metrics and health monitoring
 ├── ingestion/                      # Data ingestion pipeline
 │   ├── pipeline.py                 # Main ingestion orchestrator
 │   ├── chunker.py                  # Markdown document chunker
-│   ├── embedder.py                 # Embedding generation (sentence-transformers)
-│   ├── gcs_sync.py                 # GCS sync for vector DB backup
+│   ├── gitlab_api.py               # GitLab API client
 │   ├── repo_manager.py             # GitLab handbook repository manager
-│   └── vector_store.py             # ChromaDB vector database wrapper
-├── mcp_server/                     # MCP server implementation
-│   └── server.py                   # ThothMCPServer with search tools
-└── utils/                          # Utility modules
-    ├── logger.py                   # Logging utilities
-    └── secrets.py                  # Secret management
+│   ├── worker.py                   # Task worker for parallel processing
+│   └── gcs_repo_sync.py            # GCS sync for repository data
+├── mcp/                            # Model Context Protocol server
+│   ├── http_wrapper.py             # HTTP/SSE wrapper for Cloud Run
+│   └── server/                     # MCP server implementation
+│       ├── server.py               # ThothMCPServer with search tools
+│       └── plugins/                # Tool and RAG plugins
+└── shared/                         # Shared utilities and services
+    ├── cli.py                      # CLI commands (ingest, search, schedule)
+    ├── embedder.py                 # Embedding generation (sentence-transformers)
+    ├── gcs_sync.py                 # GCS sync for vector DB backup
+    ├── health.py                   # Health check for Cloud Run
+    ├── monitoring.py               # Metrics and health monitoring
+    ├── scheduler.py                # APScheduler for automated syncs
+    ├── vector_store.py             # ChromaDB vector database wrapper
+    └── utils/                      # Utility modules
+        ├── logger.py               # Logging utilities
+        └── secrets.py              # Secret management
 
 terraform/                          # Infrastructure as Code (Terraform)
 ├── main.tf                         # Provider config, Terraform Cloud backend

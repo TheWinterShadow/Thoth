@@ -159,7 +159,7 @@ The application will log warnings for missing optional variables but will fail f
 
 ```bash
 # Local
-python -m thoth.mcp_server.server
+python -m thoth.mcp.server
 
 # Cloud Run
 gcloud logging read "resource.labels.service_name=thoth-mcp-server" --limit=100

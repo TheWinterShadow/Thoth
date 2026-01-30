@@ -19,6 +19,7 @@ thoth.ingestion.pipeline
       Callable
       Chunk
       Embedder
+      GCSRepoSync
       HandbookRepoManager
       IngestionPipeline
       MarkdownChunker

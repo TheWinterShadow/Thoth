@@ -29,9 +29,8 @@ thoth.ingestion
    :recursive:
 
    chunker
-   embedder
-   gcs_sync
+   gcs_repo_sync
    gitlab_api
    pipeline
    repo_manager
-   vector_store
+   worker

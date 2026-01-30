@@ -1,7 +1,7 @@
-thoth.ingestion.gcs\_sync
-=========================
+thoth.shared.gcs\_sync
+======================
 
-.. automodule:: thoth.ingestion.gcs_sync
+.. automodule:: thoth.shared.gcs_sync
 
    
    .. rubric:: Classes

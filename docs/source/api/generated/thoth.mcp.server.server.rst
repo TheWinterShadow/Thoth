@@ -1,7 +1,7 @@
-﻿thoth.mcp\_server.server
-========================
+thoth.mcp.server.server
+=======================
 
-.. automodule:: thoth.mcp_server.server
+.. automodule:: thoth.mcp.server.server
 
    
    .. rubric:: Functions
@@ -21,7 +21,10 @@
       Any
       Path
       Repo
+      Route
       Server
+      SseServerTransport
+      Starlette
       TextContent
       ThothMCPServer
       Tool

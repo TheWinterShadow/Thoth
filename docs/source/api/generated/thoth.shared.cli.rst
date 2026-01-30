@@ -1,7 +1,7 @@
-thoth.cli
-=========
+thoth.shared.cli
+================
 
-.. automodule:: thoth.cli
+.. automodule:: thoth.shared.cli
 
    
    .. rubric:: Functions
