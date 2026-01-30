@@ -18,6 +18,8 @@ jobs:
     env:
       # Use CPU-only PyTorch to save disk space
       UV_EXTRA_INDEX_URL: https://download.pytorch.org/whl/cpu
+      # Allow uv to pick best version from any index (PyTorch index has old requests)
+      UV_INDEX_STRATEGY: unsafe-best-match
     steps:
       - uses: actions/checkout@v4
 
@@ -50,6 +52,7 @@ jobs:
     needs: lint
     env:
       UV_EXTRA_INDEX_URL: https://download.pytorch.org/whl/cpu
+      UV_INDEX_STRATEGY: unsafe-best-match
     steps:
       - uses: actions/checkout@v4
 
@@ -86,6 +89,7 @@ jobs:
         python-version: ["3.10", "3.11", "3.12", "3.13"]
     env:
       UV_EXTRA_INDEX_URL: https://download.pytorch.org/whl/cpu
+      UV_INDEX_STRATEGY: unsafe-best-match
 
     steps:
       - uses: actions/checkout@v4
