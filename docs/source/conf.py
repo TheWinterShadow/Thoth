@@ -1,8 +1,6 @@
 # Configuration file for the Sphinx documentation builder.
 #
-# This file only contains a selection of the most common options. For a full
-# set of options see the documentation:
-# https://www.sphinx-doc.org/en/master/usage/configuration.html
+# For full options see: https://www.sphinx-doc.org/en/master/usage/configuration.html
 
 # -- Path setup --------------------------------------------------------------
 
@@ -32,6 +30,22 @@ extensions = [
     "sphinx.ext.coverage",  # Check documentation coverage
     # Markdown support
     "myst_parser",  # Parse Markdown files
+    "sphinxcontrib.mermaid",  # Mermaid diagram support
+    "sphinxcontrib.redoc",  # OpenAPI/Swagger rendering
+]
+
+# ReDoc settings for OpenAPI rendering
+redoc = [
+    {
+        "name": "Thoth API",
+        "page": "api/http",
+        "spec": "api/openapi.yaml",
+        "embed": True,
+        "opts": {
+            "lazy-rendering": True,
+            "hide-hostname": True,
+        },
+    },
 ]
 
 # AutoDoc settings
@@ -68,7 +82,7 @@ myst_enable_extensions = [
     "substitution",  # Variable substitutions
     "tasklist",  # Task lists with checkboxes
 ]
-
+myst_fence_as_directive = ["mermaid"]  # Render ```mermaid blocks as directives
 myst_heading_anchors = 3  # Auto-generate anchors for headings up to level 3
 
 # AutoSummary settings
@@ -94,21 +108,35 @@ source_suffix = {
 
 # -- Options for HTML output -------------------------------------------------
 
-html_theme = "classic"
+html_theme = "shibuya"
 html_static_path = ["_static"]
 
-# Alabaster theme options
+# Shibuya theme options
 html_theme_options = {
-    "description": "Python utilities and MCP server framework",
-    "github_user": "TheWinterShadow",
-    "github_repo": "Thoth",
-    "github_banner": True,
-    "github_button": True,
-    "github_type": "star",
-    "fixed_sidebar": True,
+    # GitHub integration
+    "github_url": "https://github.com/TheWinterShadow/Thoth",
+    # Accent color https://github.com/lepture/shibuya/blob/main/docs/customisation/colors.rst
+    "accent_color": "indigo",
+    # Light/dark mode
+    "dark_code": True,
+    # Navigation
+    "nav_links": [
+        {"title": "Getting Started", "url": "getting_started"},
+        {"title": "Architecture", "url": "architecture/index"},
+        {"title": "API", "url": "api/index"},
+    ],
 }
 
-html_title = f"{project} v{version}"
+# Page context for source links
+html_context = {
+    "source_type": "github",
+    "source_user": "TheWinterShadow",
+    "source_repo": "Thoth",
+    "source_version": "main",
+    "source_docs_path": "/docs/source/",
+}
+
+html_title = project
 html_short_title = project
 
 # -- Options for LaTeX output ------------------------------------------------

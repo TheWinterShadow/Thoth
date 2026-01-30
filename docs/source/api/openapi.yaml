@@ -1,0 +1,365 @@
+openapi: 3.1.0
+info:
+  title: Thoth API
+  description: |
+    API specification for Thoth services:
+    - **MCP Server**: Model Context Protocol server for AI assistants
+    - **Ingestion Worker**: Document processing and embedding pipeline
+  version: 1.0.0
+  contact:
+    name: TheWinterShadow
+    url: https://github.com/TheWinterShadow/Thoth
+
+servers:
+  - url: https://thoth-mcp-server-{hash}-uc.a.run.app
+    description: MCP Server (Cloud Run)
+  - url: https://thoth-ingestion-worker-{hash}-uc.a.run.app
+    description: Ingestion Worker (Cloud Run)
+
+tags:
+  - name: MCP Server
+    description: Model Context Protocol endpoints
+  - name: Ingestion
+    description: Document ingestion endpoints
+  - name: Health
+    description: Health check endpoints
+
+paths:
+  # ============================================================================
+  # MCP Server Endpoints
+  # ============================================================================
+  /:
+    get:
+      tags: [Health]
+      summary: Root health check
+      description: Simple health check for load balancer probes
+      operationId: rootHealth
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /health:
+    get:
+      tags: [Health]
+      summary: Detailed health status
+      description: Returns detailed health status including component checks
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DetailedHealthResponse'
+        '503':
+          description: Service is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DetailedHealthResponse'
+
+  /sse:
+    get:
+      tags: [MCP Server]
+      summary: SSE connection for MCP protocol
+      description: |
+        Establishes a Server-Sent Events connection for MCP protocol communication.
+        Clients send requests via POST /messages and receive responses through this stream.
+      operationId: sseConnect
+      responses:
+        '200':
+          description: SSE stream established
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: SSE event stream
+
+  /messages:
+    post:
+      tags: [MCP Server]
+      summary: Send MCP message
+      description: |
+        Send an MCP protocol message. Responses are delivered via the SSE connection.
+
+        **Supported MCP methods:**
+        - `tools/list` - List available tools
+        - `tools/call` - Execute a tool
+        - `resources/list` - List available resources
+        - `resources/read` - Read a resource
+      operationId: sendMessage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MCPRequest'
+            examples:
+              listTools:
+                summary: List available tools
+                value:
+                  jsonrpc: "2.0"
+                  id: 1
+                  method: "tools/list"
+              searchHandbook:
+                summary: Search handbook
+                value:
+                  jsonrpc: "2.0"
+                  id: 2
+                  method: "tools/call"
+                  params:
+                    name: "search_handbook"
+                    arguments:
+                      query: "onboarding process"
+                      n_results: 5
+      responses:
+        '202':
+          description: Message accepted, response via SSE
+        '400':
+          description: Invalid request format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # ============================================================================
+  # Ingestion Worker Endpoints
+  # ============================================================================
+  /clone-to-gcs:
+    post:
+      tags: [Ingestion]
+      summary: Clone repository to GCS
+      description: |
+        Clones the GitLab handbook repository and uploads it to Google Cloud Storage.
+        This is typically a one-time setup operation.
+      operationId: cloneToGcs
+      security:
+        - cloudIdentity: []
+      responses:
+        '200':
+          description: Repository cloned successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CloneResponse'
+        '500':
+          description: Clone operation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /ingest:
+    post:
+      tags: [Ingestion]
+      summary: Trigger parallel ingestion
+      description: |
+        Initiates the ingestion pipeline. Files are divided into batches and
+        processed in parallel via Cloud Tasks.
+      operationId: triggerIngestion
+      security:
+        - cloudIdentity: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IngestRequest'
+      responses:
+        '202':
+          description: Ingestion started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestResponse'
+        '500':
+          description: Failed to start ingestion
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /ingest-batch:
+    post:
+      tags: [Ingestion]
+      summary: Process file batch
+      description: |
+        Processes a specific batch of files. Called by Cloud Tasks for parallel processing.
+        Each batch is processed independently: chunk → embed → store.
+      operationId: ingestBatch
+      security:
+        - cloudIdentity: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchRequest'
+            example:
+              start_index: 0
+              end_index: 100
+              file_list:
+                - "handbook/engineering/onboarding.md"
+                - "handbook/engineering/code-review.md"
+      responses:
+        '200':
+          description: Batch processed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchResponse'
+        '500':
+          description: Batch processing failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  securitySchemes:
+    cloudIdentity:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Google Cloud Identity token (obtained via `gcloud auth print-identity-token`)
+
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ok, error]
+          example: ok
+
+    DetailedHealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy]
+        checks:
+          type: object
+          properties:
+            vector_store:
+              type: string
+              enum: [ok, error]
+            embedder:
+              type: string
+              enum: [ok, error]
+            gcs:
+              type: string
+              enum: [ok, error]
+        timestamp:
+          type: string
+          format: date-time
+
+    MCPRequest:
+      type: object
+      required: [jsonrpc, id, method]
+      properties:
+        jsonrpc:
+          type: string
+          const: "2.0"
+        id:
+          oneOf:
+            - type: integer
+            - type: string
+        method:
+          type: string
+          enum:
+            - tools/list
+            - tools/call
+            - resources/list
+            - resources/read
+        params:
+          type: object
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        detail:
+          type: string
+
+    CloneResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: success
+        files_uploaded:
+          type: integer
+          example: 1234
+        gcs_path:
+          type: string
+          example: gs://bucket/handbook/
+
+    IngestRequest:
+      type: object
+      properties:
+        force:
+          type: boolean
+          default: false
+          description: Force re-ingestion of all files
+        batch_size:
+          type: integer
+          default: 100
+          description: Files per batch task
+
+    IngestResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: started
+        total_files:
+          type: integer
+          example: 1000
+        batches_created:
+          type: integer
+          example: 10
+        task_ids:
+          type: array
+          items:
+            type: string
+
+    BatchRequest:
+      type: object
+      required: [start_index, end_index, file_list]
+      properties:
+        start_index:
+          type: integer
+          description: Start index in file list
+        end_index:
+          type: integer
+          description: End index in file list
+        file_list:
+          type: array
+          items:
+            type: string
+          description: List of file paths to process
+
+    BatchResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: completed
+        files_processed:
+          type: integer
+        chunks_created:
+          type: integer
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              file:
+                type: string
+              error:
+                type: string

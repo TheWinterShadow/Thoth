@@ -190,9 +190,11 @@ precommit = [
 
 [tool.hatch.envs.docs]
 dependencies = [
-  "sphinx",
-  "furo", 
+  "sphinx>=7.0",
+  "shibuya",
   "myst-parser",
+  "sphinxcontrib-mermaid",
+  "sphinxcontrib-redoc",
 ]
 
 [tool.hatch.envs.dev.scripts]
