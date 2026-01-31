@@ -182,7 +182,7 @@ Tests run automatically in GitHub Actions:
 test:
   strategy:
     matrix:
-      python-version: ["3.10", "3.11", "3.12", "3.13"]
+      python-version: ["3.12"]
   steps:
     - name: Run tests
       run: hatch test

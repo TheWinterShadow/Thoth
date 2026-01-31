@@ -465,7 +465,7 @@ async def _process_single_batch(
 
     try:
         batch_collection = batch_client.get_collection(name=collection_name)
-        batch_docs = batch_collection.get(include=["documents", "metadatas", "embeddings"])  # type: ignore[list-item]
+        batch_docs = batch_collection.get(include=["documents", "metadatas", "embeddings"])
 
         if batch_docs["ids"]:
             main_store.add_documents(

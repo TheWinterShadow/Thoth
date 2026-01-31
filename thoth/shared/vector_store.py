@@ -6,7 +6,7 @@ document embeddings with CRUD operations and optional GCS backup.
 
 import importlib.util
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import chromadb
 from chromadb.config import Settings
@@ -135,9 +135,9 @@ class VectorStore:
         # Upsert documents to collection (add or update if ID exists)
         self.collection.upsert(
             documents=documents,
-            metadatas=metadatas,  # type: ignore[arg-type]
+            metadatas=cast("Any", metadatas),
             ids=ids,
-            embeddings=embeddings,  # type: ignore[arg-type]
+            embeddings=cast("Any", embeddings),
         )
 
         logger.info(f"Upserted {len(documents)} documents to collection")
@@ -172,10 +172,10 @@ class VectorStore:
             query_embedding = self.embedder.embed_single(query)
 
         results = self.collection.query(
-            query_embeddings=[query_embedding],  # type: ignore[arg-type]
+            query_embeddings=cast("Any", [query_embedding]),
             n_results=n_results,
             where=where,
-            where_document=where_document,  # type: ignore[arg-type]
+            where_document=cast("Any", where_document),
         )
 
         # Flatten results (ChromaDB returns nested lists)
@@ -186,7 +186,7 @@ class VectorStore:
             "distances": results["distances"][0] if results["distances"] else [],
         }
 
-        result_count = len(flattened_results["ids"])  # type: ignore[arg-type]
+        result_count = len(cast("list", flattened_results["ids"]))
         logger.info(f"Search returned {result_count} results for query: '{query[:50]}...'")
 
         return flattened_results
@@ -247,7 +247,7 @@ class VectorStore:
         Returns:
             Number of documents in the collection
         """
-        return self.collection.count()
+        return int(self.collection.count())
 
     def get_documents(
         self,
@@ -272,7 +272,7 @@ class VectorStore:
 
         logger.info(f"Retrieved {len(results['ids'])} documents")
 
-        return results  # type: ignore[return-value]
+        return dict(results)
 
     def reset(self) -> None:
         """Reset the collection by deleting all documents.

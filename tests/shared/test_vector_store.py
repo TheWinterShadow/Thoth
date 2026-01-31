@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import tempfile
 import unittest
+from unittest.mock import MagicMock
 
 from thoth.shared.vector_store import VectorStore
 
@@ -19,7 +20,19 @@ class TestVectorStore(unittest.TestCase):
         """Set up test fixtures before each test method."""
         # Create a temporary directory for test database
         self.test_dir = tempfile.mkdtemp()
-        self.vector_store = VectorStore(persist_directory=self.test_dir, collection_name="test_collection")
+
+        # Mock embedder to avoid internet calls
+        self.mock_embedder = MagicMock()
+        self.mock_embedder.model_name = "mock-model"
+        # Mock embed methods to return dummy embeddings (dimension 384)
+        self.mock_embedder.embed.side_effect = lambda texts, **kwargs: [[0.1] * 384] * len(texts)
+        self.mock_embedder.embed_single.return_value = [0.1] * 384
+
+        self.vector_store = VectorStore(
+            persist_directory=self.test_dir,
+            collection_name="test_collection",
+            embedder=self.mock_embedder,
+        )
 
     def tearDown(self):
         """Clean up after each test method."""
@@ -259,7 +272,12 @@ class TestVectorStore(unittest.TestCase):
         self.vector_store.add_documents(documents, ids=ids)
 
         # Create new instance with same directory
-        new_vector_store = VectorStore(persist_directory=self.test_dir, collection_name="test_collection")
+        # Reuse embedder to avoid re-initialization overhead and network calls
+        new_vector_store = VectorStore(
+            persist_directory=self.test_dir,
+            collection_name="test_collection",
+            embedder=self.vector_store.embedder,
+        )
 
         # Verify documents persist
         self.assertEqual(new_vector_store.get_document_count(), 2)

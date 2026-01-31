@@ -18,7 +18,8 @@ class HealthCheck:
     @staticmethod
     def check_python_version() -> bool:
         """Check if Python version is acceptable."""
-        return sys.version_info >= (3, 10)
+        # ChromaDB/OnnxRuntime does not yet support Python 3.13
+        return (3, 10) <= sys.version_info < (3, 13)
 
     @staticmethod
     def check_imports() -> dict[str, bool]:
