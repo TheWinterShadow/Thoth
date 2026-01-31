@@ -72,3 +72,4 @@ handbook_vectors/
 *.ipynb
 benchmark_embeddings.py
 auth/
+:memory:/

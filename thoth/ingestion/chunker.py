@@ -57,14 +57,19 @@ class ChunkMetadata:
     format: str = ""  # Document format (e.g., 'markdown', 'pdf', 'text', 'docx')
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert metadata to dictionary.
+        """Convert metadata to a dict suitable for vector store metadata columns.
 
-        Ensures all values are ChromaDB-compatible types (str, int, float, bool).
-        Lists are converted to comma-separated strings.
+        Ensures all values are store-compatible types (str, int, float, bool).
+        Lists (e.g., headers) are converted to comma-separated strings.
+
+        Returns:
+            Dict with chunk_id, file_path, chunk_index, total_chunks, headers (str),
+            start_line, end_line, token_count, char_count, timestamp, overlap flags,
+            source, format.
         """
 
         def sanitize_value(value: Any) -> str | int | float | bool:
-            """Convert any value to ChromaDB-compatible type."""
+            """Convert a value to a type supported by LanceDB/vector store metadata."""
             if isinstance(value, (str, int, float, bool)):
                 return value
             if isinstance(value, list):
@@ -92,7 +97,7 @@ class ChunkMetadata:
             "format": self.format,
         }
 
-        # Sanitize all values to ensure ChromaDB compatibility
+        # Sanitize all values so metadata is compatible with LanceDB/vector store.
         return {k: sanitize_value(v) for k, v in raw_dict.items()}
 
 

@@ -1,4 +1,9 @@
-"""Health check endpoint for Cloud Run deployments."""
+"""Health check logic for Cloud Run and local deployments.
+
+This module provides checks for Python version, critical imports (LanceDB,
+sentence-transformers, MCP), storage writability, and GCS configuration.
+Used by the /health endpoint and monitoring to report service readiness.
+"""
 
 import importlib.util
 import json
@@ -13,20 +18,33 @@ logger = setup_logger(__name__)
 
 
 class HealthCheck:
-    """Health check functionality for monitoring service health."""
+    """Static health checks for Python, imports, storage, and GCS config.
+
+    Used by the HTTP health endpoint to return a single status dict; each
+    check returns a bool or a dict of sub-checks. Overall status is healthy
+    only when Python version and critical imports (lancedb, mcp) pass.
+    """
 
     @staticmethod
     def check_python_version() -> bool:
-        """Check if Python version is acceptable."""
-        # ChromaDB/OnnxRuntime does not yet support Python 3.13
+        """Return True if Python version is in the supported range (3.10 to 3.12).
+
+        Returns:
+            True when 3.10 <= version < 3.13 (LanceDB/sentence-transformers compatibility).
+        """
+        # Python 3.13+ not yet fully supported by some deps (e.g., OnnxRuntime).
         return (3, 10) <= sys.version_info < (3, 13)
 
     @staticmethod
     def check_imports() -> dict[str, bool]:
-        """Check if critical imports are available."""
+        """Check that critical runtime dependencies can be imported.
+
+        Returns:
+            Dict of module name -> True if importable (lancedb, torch, sentence_transformers, mcp).
+        """
         checks = {}
 
-        checks["chromadb"] = importlib.util.find_spec("chromadb") is not None
+        checks["lancedb"] = importlib.util.find_spec("lancedb") is not None
         checks["torch"] = importlib.util.find_spec("torch") is not None
         checks["sentence_transformers"] = importlib.util.find_spec("sentence_transformers") is not None
         checks["mcp"] = importlib.util.find_spec("mcp") is not None
@@ -47,7 +65,12 @@ class HealthCheck:
 
     @staticmethod
     def check_gcs_config() -> dict[str, bool]:
-        """Check GCS configuration."""
+        """Check that GCS env vars and credentials are configured.
+
+        Returns:
+            Dict with gcs_bucket_configured, gcp_project_configured,
+            gcs_credentials_file_exists (when GOOGLE_APPLICATION_CREDENTIALS is set).
+        """
         checks = {}
         checks["gcs_bucket_configured"] = bool(os.getenv("GCS_BUCKET_NAME"))
         checks["gcp_project_configured"] = bool(os.getenv("GCP_PROJECT_ID"))
@@ -65,10 +88,15 @@ class HealthCheck:
 
     @classmethod
     def get_health_status(cls) -> dict[str, Any]:
-        """Get comprehensive health status.
+        """Return a full health status dict for the /health endpoint.
+
+        Aggregates Python version, import checks (lancedb, torch, sentence_transformers, mcp),
+        storage writability, and GCS config. Overall status is 'healthy' only when
+        Python version and critical imports (lancedb, mcp) all pass.
 
         Returns:
-            Dictionary with health check results
+            Dict with keys: status ('healthy'|'unhealthy'), python_version, python_ok,
+            imports, storage, gcs.
         """
         status = {
             "status": "healthy",
@@ -79,11 +107,11 @@ class HealthCheck:
             "gcs": cls.check_gcs_config(),
         }
 
-        # Determine overall health
+        # Determine overall health: Python OK and critical imports (lancedb, mcp) must pass.
         imports_status = status["imports"]
         critical_checks = [
             status["python_ok"],
-            (imports_status.get("chromadb", False) if isinstance(imports_status, dict) else False),
+            (imports_status.get("lancedb", False) if isinstance(imports_status, dict) else False),
             (imports_status.get("mcp", False) if isinstance(imports_status, dict) else False),
         ]
 
@@ -104,7 +132,7 @@ class HealthCheck:
 
 
 def health_check_cli() -> None:
-    """CLI command for health check."""
+    """Print health status to stdout and exit with 0 if healthy, 1 if unhealthy."""
     status = HealthCheck.get_health_status()
 
     # Print for CLI use (this is intentional for the CLI tool)

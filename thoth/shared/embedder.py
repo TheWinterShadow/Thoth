@@ -42,12 +42,13 @@ class Embedder:
         self.batch_size = batch_size
         self.logger = logger_instance or logger
 
-        # Set HuggingFace token if available (for downloading models)
+        # HuggingFace token: required for gated models; sentence-transformers reads HUGGING_FACE_HUB_TOKEN.
         hf_token = os.getenv("HF_TOKEN")
         if hf_token:
             os.environ["HUGGING_FACE_HUB_TOKEN"] = hf_token
 
         self.logger.info(f"Loading embedding model: {model_name}")
+        # First load downloads from HuggingFace Hub if not cached; device=None auto-selects CUDA/CPU.
         self.model = SentenceTransformer(model_name, device=device)
         self.logger.info(f"Model loaded successfully on device: {self.model.device}")
 

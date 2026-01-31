@@ -32,7 +32,7 @@ Thoth logs are output as structured JSON with the following fields:
 |-------|------|-------------|
 | `job_id` | string | Unique job identifier for correlation |
 | `source` | string | Data source: `handbook`, `dnd`, `personal` |
-| `collection` | string | ChromaDB collection name |
+| `collection` | string | LanceDB table (collection) name |
 | `operation` | string | Current operation: `chunking`, `embedding`, `storing` |
 | `batch_id` | string | Batch identifier for parallel processing |
 

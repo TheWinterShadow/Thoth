@@ -55,7 +55,11 @@ class HealthCheck:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary representation."""
+        """Convert this health check result to a JSON-serializable dict.
+
+        Returns:
+            Dict with name, status (str), message, timestamp (ISO), metadata.
+        """
         return {
             "name": self.name,
             "status": self.status.value,
@@ -90,7 +94,11 @@ class Metrics:
     errors: list[dict[str, str]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary representation."""
+        """Convert metrics to a JSON-serializable dict for APIs or export.
+
+        Returns:
+            Dict with sync counts, last sync time/duration, totals, error_count, recent_errors.
+        """
         return {
             "sync_count": self.sync_count,
             "sync_success_count": self.sync_success_count,
@@ -136,8 +144,8 @@ class Monitor:
         self._lock = threading.Lock()
 
     def record_sync_start(self) -> None:
-        """Record the start of a sync operation."""
-        with self._lock:
+        """Record the start of a sync operation (thread-safe)."""
+        with self._lock:  # Protects metrics from concurrent scheduler/CLI updates
             self.metrics.sync_count += 1
             self.metrics.last_sync_time = datetime.now(timezone.utc)
             self.logger.debug("Sync operation started")

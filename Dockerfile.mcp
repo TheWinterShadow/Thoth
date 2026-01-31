@@ -1,5 +1,5 @@
 # Lightweight build for Thoth MCP Server (no ingestion)
-FROM python:3.12-slim as builder
+FROM python:3.12-slim AS builder
 
 WORKDIR /build
 
@@ -16,7 +16,8 @@ COPY thoth/__about__.py ./thoth/__about__.py
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir \
         "mcp>=1.26.0" \
-        "chromadb>=1.4.1" \
+        "lancedb>=0.4.0" \
+        "pyarrow>=14.0.0" \
         "google-cloud-storage>=3.7.0" \
         "google-cloud-secret-manager>=2.26.0" \
         "starlette>=0.52.1" \
@@ -25,6 +26,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
         "gitpython>=3.1.46" \
         "sentence-transformers>=5.2.2" \
         "torch>=2.10.0" \
+        "httpx>=0.28.1" \
         "python-json-logger>=4.0.0"
 
 # Copy source code (only MCP server parts)
@@ -55,8 +57,8 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 # Copy only MCP server code
 COPY --from=builder /build/thoth /app/thoth
 
-# Create minimal directories
-RUN mkdir -p /app/data/chroma_db
+# Create minimal directories (LanceDB local store / handbook_vectors)
+RUN mkdir -p /app/data/lancedb /app/data/handbook_vectors
 
 # Environment variables
 ENV PYTHONUNBUFFERED=1 \

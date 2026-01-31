@@ -18,7 +18,7 @@ tests/
 │   ├── test_mcp_server.py           # Tool execution, search, caching
 │   └── test_http_wrapper.py         # HTTP transport tests
 └── shared/                          # Shared utility tests
-    ├── test_vector_store.py         # ChromaDB operations
+    ├── test_vector_store.py         # LanceDB operations
     ├── test_embedder.py             # Embedding generation
     ├── test_cli.py                  # CLI commands
     └── utils/                       # Utility tests
@@ -164,7 +164,7 @@ def sample_markdown():
 
 @pytest.fixture
 def temp_vector_store(tmp_path):
-    return VectorStore(path=tmp_path / "chroma")
+    return VectorStore(persist_directory=str(tmp_path / "lancedb"))
 
 @pytest.fixture
 def mock_embedder(mocker):

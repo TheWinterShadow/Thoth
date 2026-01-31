@@ -33,7 +33,21 @@ DEFAULT_BATCH_SIZE = 50  # Process files in batches
 
 @dataclass
 class PipelineState:
-    """Tracks the state of the ingestion pipeline."""
+    """Mutable state for a single pipeline run (resume and progress tracking).
+
+    Persisted to pipeline_state.json so runs can resume after interruption.
+    Tracks last processed commit, file lists, chunk counts, and completion flag.
+
+    Attributes:
+        last_commit: Last Git commit processed (for incremental sync).
+        processed_files: List of file paths successfully processed.
+        failed_files: Dict of file_path -> error_message for failed files.
+        total_chunks: Total chunks created this run.
+        total_documents: Total documents (chunks) added to the vector store.
+        start_time: ISO timestamp when run started.
+        last_update_time: ISO timestamp of last state save.
+        completed: True when the run finished without error.
+    """
 
     last_commit: str | None = None
     processed_files: list[str] = field(default_factory=list)
@@ -45,7 +59,12 @@ class PipelineState:
     completed: bool = False
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert state to dictionary."""
+        """Serialize state to a dict for JSON persistence.
+
+        Returns:
+            Dict with last_commit, processed_files, failed_files, total_chunks,
+            total_documents, start_time, last_update_time, completed.
+        """
         return {
             "last_commit": self.last_commit,
             "processed_files": self.processed_files,
@@ -59,7 +78,14 @@ class PipelineState:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "PipelineState":
-        """Create state from dictionary."""
+        """Deserialize state from a dict (e.g., from pipeline_state.json).
+
+        Args:
+            data: Dict with keys matching PipelineState attributes.
+
+        Returns:
+            PipelineState instance with restored values.
+        """
         return cls(
             last_commit=data.get("last_commit"),
             processed_files=data.get("processed_files", []),
@@ -74,7 +100,21 @@ class PipelineState:
 
 @dataclass
 class PipelineStats:
-    """Statistics from pipeline execution."""
+    """Read-only statistics from a completed pipeline run.
+
+    Returned by run() and used for logging and monitoring. All counts and
+    rates are computed at the end of the run.
+
+    Attributes:
+        total_files: Total files discovered for processing.
+        processed_files: Files successfully processed.
+        failed_files: Files that failed (with errors).
+        total_chunks: Chunks created and stored.
+        total_documents: Documents (chunks) in the vector store after run.
+        duration_seconds: Elapsed time in seconds.
+        chunks_per_second: Throughput (chunks / duration).
+        files_per_second: Throughput (files / duration).
+    """
 
     total_files: int
     processed_files: int
@@ -125,7 +165,7 @@ class IngestionPipeline:
             state_file: Path to state file for resume capability
             batch_size: Number of files to process in each batch
             logger_instance: Logger instance for logging
-            collection_name: Name of the ChromaDB collection to use
+            collection_name: Name of the vector store table (collection) to use
             source_config: Source configuration for multi-source support
         """
         self.logger = logger_instance or logger
@@ -161,14 +201,14 @@ class IngestionPipeline:
                 # Cloud Run: use /tmp for local cache and sync with GCS
                 self.logger.info(f"Cloud Run detected - using GCS bucket: {gcs_bucket}")
                 self.vector_store = VectorStore(
-                    persist_directory="/tmp/chroma_db",  # nosec B108 - Cloud Run requires /tmp
+                    persist_directory="/tmp/lancedb",  # nosec B108 - Cloud Run uses GCS URI
                     collection_name=collection_name,
                     gcs_bucket_name=gcs_bucket,
                     gcs_project_id=gcs_project,
                     logger_instance=self.logger,
                 )
             else:
-                # Local: use default chroma_db directory
+                # Local: use default lancedb directory
                 self.vector_store = VectorStore(collection_name=collection_name, logger_instance=self.logger)
         else:
             self.vector_store = vector_store

@@ -13,7 +13,7 @@ This document describes the environment variables used by the Thoth application.
 - `GCS_BUCKET_NAME` - Name of GCS bucket for vector DB persistence (e.g., `thoth-storage-bucket`)
 
 ### Application Settings
-- `CHROMA_PERSIST_DIRECTORY` - Path for ChromaDB persistence (default: `./chroma_db`)
+- `GCS_BUCKET_NAME` / local path - LanceDB uses `gs://bucket/lancedb` in cloud or local directory
 - `LOG_LEVEL` - Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL (default: `INFO`)
 
 ## Optional Environment Variables
@@ -75,7 +75,7 @@ Create a `.env` file in the project root:
 # .env
 GCP_PROJECT_ID=thoth-dev-485501
 GCS_BUCKET_NAME=thoth-storage-bucket
-CHROMA_PERSIST_DIRECTORY=./chroma_db
+# LanceDB: local path via --db-path or gs://bucket/lancedb when GCS_BUCKET_NAME set
 LOG_LEVEL=DEBUG
 GITLAB_TOKEN=your_gitlab_token_here
 ```

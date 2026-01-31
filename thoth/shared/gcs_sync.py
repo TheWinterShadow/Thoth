@@ -1,7 +1,9 @@
-"""Google Cloud Storage sync module for vector database persistence.
+"""Google Cloud Storage sync for vector database persistence.
 
-This module provides functionality to sync ChromaDB vector database
-to/from Google Cloud Storage for persistence and disaster recovery.
+This module provides upload/download of local vector database directories
+(e.g., LanceDB or legacy ChromaDB data) to/from a GCS bucket for backup
+and restore. Used by the ingestion worker and CLI when not using a direct
+gs:// LanceDB URI.
 """
 
 from datetime import datetime, timezone
@@ -29,10 +31,12 @@ class GCSSyncError(Exception):
 
 
 class GCSSync:
-    """Manages synchronization of ChromaDB data with Google Cloud Storage.
+    """Manages sync of local vector DB directories to/from Google Cloud Storage.
 
-    This class handles uploading and downloading ChromaDB persistence
-    directories to/from GCS buckets for backup and restore operations.
+    Handles uploading a local directory (e.g., LanceDB or ChromaDB persistence
+    path) to a GCS prefix and downloading it back for restore. Verifies bucket
+    existence on init and uses Application Default Credentials or a provided
+    credentials path.
     """
 
     def __init__(

@@ -1450,7 +1450,12 @@ class TestHelperMethods(unittest.IsolatedAsyncioTestCase):
 
 
 class TestVectorStoreIntegration(unittest.IsolatedAsyncioTestCase):
-    """Test suite for vector store integration."""
+    """Test suite for vector store integration.
+
+    Avoids real VectorStore/embedder initialization so tests never hit the
+    network (e.g. HuggingFace model download). Lazy load is disabled by
+    setting _vector_stores_loaded = True after server creation.
+    """
 
     async def asyncSetUp(self):
         """Set up test fixtures."""
@@ -1459,6 +1464,8 @@ class TestVectorStoreIntegration(unittest.IsolatedAsyncioTestCase):
             version="1.0.0",
             base_db_path="./handbook_vectors",
         )
+        # Prevent lazy load so no real VectorStore or embedder is used (no network).
+        self.server._vector_stores_loaded = True
 
     async def test_vector_store_attribute_exists(self):
         """Test that vector_store attribute exists."""

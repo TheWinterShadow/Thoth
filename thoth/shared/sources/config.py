@@ -15,14 +15,18 @@ logger = setup_logger(__name__)
 
 @dataclass
 class SourceConfig:
-    """Configuration for a data source.
+    """Configuration for a single data source (handbook, D&D, personal, etc.).
+
+    Each source has a unique name, a LanceDB table (collection) name, a GCS
+    prefix for stored files, and a list of supported file extensions. Used by
+    the ingestion pipeline and MCP server to route and filter documents.
 
     Attributes:
-        name: Unique identifier for the source (e.g., 'handbook', 'dnd')
-        collection_name: ChromaDB collection name for this source
-        gcs_prefix: GCS prefix where source files are stored
-        supported_formats: List of supported file extensions (e.g., ['.md', '.pdf'])
-        description: Human-readable description of the source
+        name: Unique identifier for the source (e.g., 'handbook', 'dnd', 'personal').
+        collection_name: LanceDB table name for this source (e.g., 'handbook_documents').
+        gcs_prefix: GCS path prefix where source files are stored in the bucket.
+        supported_formats: File extensions supported for ingestion (e.g., ['.md', '.pdf']).
+        description: Human-readable description of the source for logging and UI.
     """
 
     name: str

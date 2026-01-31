@@ -52,7 +52,7 @@ generated/thoth
 - `http_wrapper` - HTTP/SSE transport
 
 **Shared Utilities** (`thoth.shared`)
-- `vector_store` - ChromaDB wrapper
+- `vector_store` - LanceDB wrapper
 - `embedder` - Embedding generation
 - `cli` - Command-line interface
 - `scheduler` - Scheduled tasks

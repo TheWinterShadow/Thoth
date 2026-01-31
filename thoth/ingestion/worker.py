@@ -5,7 +5,7 @@ This module provides HTTP endpoints for ingestion operations:
 - /clone-handbook: Clone GitLab handbook to GCS
 - /ingest: Start ingestion job (returns job_id)
 - /ingest-batch: Process a specific file batch (for Cloud Tasks)
-- /merge-batches: Consolidate batch ChromaDBs
+- /merge-batches: Consolidate batch LanceDB tables into main store
 - /jobs/{job_id}: Get job status
 """
 
@@ -33,13 +33,14 @@ from thoth.shared.utils.logger import (
     set_trace_context,
     setup_logger,
 )
+from thoth.shared.vector_store import VectorStore
 
 # Configure root logger for the application
 configure_root_logger(level=logging.INFO)
 logger = setup_logger(__name__)
 
-# Batch prefix pattern for parallel processing
-BATCH_PREFIX_PATTERN = "chroma_db_batch_"
+# Batch prefix pattern for parallel processing (GCS path under bucket)
+BATCH_PREFIX_PATTERN = "lancedb_batch_"
 
 
 # Global instances (lazy initialized)
@@ -50,14 +51,25 @@ class _Singletons:
 
 
 def get_source_registry() -> SourceRegistry:
-    """Get or create the source registry singleton."""
+    """Return the global SourceRegistry singleton (creates on first call).
+
+    Returns:
+        SourceRegistry with handbook, dnd, personal configs and env overrides.
+    """
     if _Singletons.source_registry is None:
         _Singletons.source_registry = SourceRegistry()
     return _Singletons.source_registry
 
 
 def get_job_manager() -> JobManager:
-    """Get or create the job manager singleton."""
+    """Return the global JobManager singleton (creates on first call).
+
+    Uses GCP_PROJECT_ID from the environment for Firestore. Returns the same
+    instance for all callers so job state is shared across endpoints.
+
+    Returns:
+        JobManager instance.
+    """
     if _Singletons.job_manager is None:
         project_id = os.getenv("GCP_PROJECT_ID")
         _Singletons.job_manager = JobManager(project_id=project_id)
@@ -65,7 +77,14 @@ def get_job_manager() -> JobManager:
 
 
 def get_task_queue() -> TaskQueueClient:
-    """Get or create the task queue client singleton."""
+    """Return the global TaskQueueClient singleton (creates on first call).
+
+    Used to enqueue batch tasks to Cloud Tasks. Returns the same instance
+    for all callers.
+
+    Returns:
+        TaskQueueClient instance (reads queue config from env).
+    """
     if _Singletons.task_queue is None:
         _Singletons.task_queue = TaskQueueClient()
     return _Singletons.task_queue
@@ -88,7 +107,14 @@ async def health_check(_request: Request) -> JSONResponse:
 
 
 async def clone_handbook(_request: Request) -> JSONResponse:
-    """Clone GitLab handbook repository to GCS (one-time setup)."""
+    """Clone the GitLab handbook repo to GCS for ingestion (one-time setup).
+
+    Uses the pipeline's GCSRepoSync to clone the repo into the configured
+    bucket/prefix. Requires GCS_BUCKET_NAME and pipeline configured for GCS.
+
+    Returns:
+        JSONResponse with status and message; 200 on success, 4xx/5xx on error.
+    """
     try:
         logger.info("Clone handbook to GCS triggered")
 
@@ -241,6 +267,7 @@ async def _run_ingestion_job(job: Job, source_config: SourceConfig, params: dict
         gcs_sync = pipeline.gcs_repo_sync
         if gcs_sync:
             job_logger.info("Syncing repository from GCS...")
+            # Run blocking GCS sync in thread pool so the event loop stays responsive.
             sync_result = await asyncio.get_event_loop().run_in_executor(
                 None,
                 lambda: gcs_sync.sync_to_local(force=force),
@@ -257,7 +284,7 @@ async def _run_ingestion_job(job: Job, source_config: SourceConfig, params: dict
             job_manager.mark_failed(job, "GCS sync not configured")
             return
 
-        # Step 2: Get file list
+        # Step 2: Get file list (run in executor to avoid blocking the event loop).
         job_logger.info("Discovering files to process...")
         file_list = await asyncio.get_event_loop().run_in_executor(
             None,
@@ -320,7 +347,7 @@ async def _run_ingestion_job(job: Job, source_config: SourceConfig, params: dict
 
         job_logger.info("Created %d sub-jobs in Firestore", len(sub_jobs))
 
-        # Step 5: Enqueue batches to Cloud Tasks
+        # Step 5: Enqueue batches to Cloud Tasks (blocking HTTP calls run in executor).
         job_logger.info("Enqueueing batches to Cloud Tasks")
 
         enqueue_result = await asyncio.get_event_loop().run_in_executor(
@@ -394,15 +421,13 @@ async def _run_direct_ingestion(
         },
     )
 
-    # Sync to GCS
-    if pipeline.vector_store.gcs_sync:
-        gcs_prefix = f"chroma_db_{pipeline.collection_name}"
-        await asyncio.get_event_loop().run_in_executor(
-            None,
-            pipeline.vector_store.sync_to_gcs,
-            gcs_prefix,
+    # LanceDB on GCS is already synced; sync_to_gcs returns status or None for local
+    sync_result = pipeline.vector_store.sync_to_gcs(f"lancedb_{pipeline.collection_name}")
+    if sync_result:
+        job_logger.info(
+            "Collection synced to GCS",
+            extra={"uri": sync_result.get("uri", "")},
         )
-        job_logger.info("Synced collection to GCS", extra={"gcs_prefix": gcs_prefix})
 
 
 # =============================================================================
@@ -488,7 +513,7 @@ async def list_jobs(request: Request) -> JSONResponse:
 # =============================================================================
 
 
-async def process_batch(request: Request) -> JSONResponse:
+async def process_batch(request: Request) -> JSONResponse:  # noqa: PLR0912, PLR0915
     """Process a specific batch of files (called by Cloud Tasks).
 
     Each batch is stored in a unique GCS prefix to avoid conflicts during
@@ -558,12 +583,30 @@ async def process_batch(request: Request) -> JSONResponse:
                 source_config = cfg
                 break
 
-        # Run ingestion in executor
-        pipeline = IngestionPipeline(
-            collection_name=collection_name,
-            source_config=source_config,
-            logger_instance=batch_logger,
-        )
+        # Batch writes to its own GCS prefix (no merge yet)
+        gcs_bucket = os.getenv("GCS_BUCKET_NAME")
+        gcs_project = os.getenv("GCP_PROJECT_ID")
+        batch_gcs_prefix = f"{BATCH_PREFIX_PATTERN}{collection_name}_{batch_id}"
+        if gcs_bucket and gcs_project:
+            batch_store = VectorStore(
+                collection_name=collection_name,
+                gcs_bucket_name=gcs_bucket,
+                gcs_project_id=gcs_project,
+                gcs_prefix_override=batch_gcs_prefix,
+            )
+            pipeline = IngestionPipeline(
+                collection_name=collection_name,
+                source_config=source_config,
+                vector_store=batch_store,
+                logger_instance=batch_logger,
+            )
+        else:
+            pipeline = IngestionPipeline(
+                collection_name=collection_name,
+                source_config=source_config,
+                logger_instance=batch_logger,
+            )
+
         result = await asyncio.get_event_loop().run_in_executor(
             None,
             pipeline.process_file_batch,
@@ -572,21 +615,11 @@ async def process_batch(request: Request) -> JSONResponse:
             file_list,
         )
 
-        # Sync to unique GCS prefix
-        batch_gcs_prefix = f"{BATCH_PREFIX_PATTERN}{collection_name}_{batch_id}"
-        sync_result = await asyncio.get_event_loop().run_in_executor(
-            None,
-            pipeline.vector_store.sync_to_gcs,
-            batch_gcs_prefix,
-        )
-
-        if sync_result:
+        # With LanceDB, batch data is already in GCS at batch_gcs_prefix
+        if gcs_bucket and gcs_project:
             batch_logger.info(
-                "Synced batch to GCS",
-                extra={
-                    "gcs_prefix": batch_gcs_prefix,
-                    "uploaded_files": sync_result.get("uploaded_files", 0),
-                },
+                "Batch written to GCS",
+                extra={"gcs_prefix": batch_gcs_prefix},
             )
 
         # Update sub-job status in Firestore
@@ -662,54 +695,59 @@ def _extract_batch_prefixes(blobs: list) -> set[str]:
 async def _process_single_batch(
     batch_prefix_name: str,
     collection_name: str,
-    gcs_sync: Any,
+    gcs_bucket: str,
     main_store: Any,
 ) -> int:
-    """Process a single batch and merge into main store. Returns document count."""
-    import shutil  # noqa: PLC0415
-
-    import chromadb  # noqa: PLC0415
-    from chromadb.config import Settings  # noqa: PLC0415
+    """Read a single LanceDB batch from GCS and merge into main store. Returns document count."""
+    import lancedb  # noqa: PLC0415
 
     logger.info("Processing batch: %s", batch_prefix_name)
-    batch_local_path = f"/tmp/batch_{batch_prefix_name}"  # nosec B108
+    batch_uri = f"gs://{gcs_bucket}/{batch_prefix_name}"
 
-    # Create a callable for run_in_executor
-    def download_batch() -> None:
-        gcs_sync.download_directory(batch_prefix_name, batch_local_path, clean_local=True)
-
-    await asyncio.get_event_loop().run_in_executor(None, download_batch)
-
-    batch_client = chromadb.PersistentClient(
-        path=batch_local_path,
-        settings=Settings(anonymized_telemetry=False),
-    )
+    def merge_batch() -> int:
+        """Run in executor: connect to batch LanceDB on GCS and add rows to main store."""
+        db = lancedb.connect(batch_uri)
+        if collection_name not in list(db.list_tables()):
+            logger.warning("Batch %s has no table %s", batch_prefix_name, collection_name)
+            return 0
+        table = db.open_table(collection_name)
+        tbl = table.to_arrow()
+        if tbl.num_rows == 0:
+            return 0
+        d = tbl.to_pydict()
+        meta_cols = [c for c in tbl.column_names if c not in ("id", "text", "vector")]
+        metadatas = [dict(zip(meta_cols, [d[c][i] for c in meta_cols], strict=True)) for i in range(tbl.num_rows)]
+        vec_col = d["vector"]
+        vectors = [v.tolist() if hasattr(v, "tolist") else list(v) for v in vec_col]
+        main_store.add_documents(
+            documents=d["text"],
+            metadatas=metadatas,
+            ids=d["id"],
+            embeddings=vectors,
+        )
+        return int(tbl.num_rows)
 
     try:
-        batch_collection = batch_client.get_collection(name=collection_name)
-        batch_docs = batch_collection.get(include=["documents", "metadatas", "embeddings"])
-
-        if batch_docs["ids"]:
-            main_store.add_documents(
-                documents=batch_docs["documents"],
-                metadatas=batch_docs["metadatas"],
-                ids=batch_docs["ids"],
-                embeddings=batch_docs["embeddings"],
-            )
-            doc_count = len(batch_docs["ids"])
+        # Run merge in thread pool; LanceDB I/O is blocking.
+        doc_count = await asyncio.get_event_loop().run_in_executor(None, merge_batch)
+        if doc_count > 0:
             logger.info("Merged %d documents from %s", doc_count, batch_prefix_name)
-            return doc_count
-    except (ValueError, KeyError, RuntimeError) as e:
-        logger.warning("Failed to extract from batch %s: %s", batch_prefix_name, e)
+        return int(doc_count)
+    except (ValueError, KeyError, RuntimeError, OSError) as e:
+        logger.warning("Failed to merge batch %s: %s", batch_prefix_name, e)
         raise
-    finally:
-        shutil.rmtree(batch_local_path, ignore_errors=True)
-
-    return 0
 
 
 def _cleanup_batch_from_gcs(batch_prefix_name: str, gcs_sync: Any) -> bool:
-    """Delete a batch prefix from GCS. Returns True if successful."""
+    """Delete all blobs under a batch prefix in GCS (after merge).
+
+    Args:
+        batch_prefix_name: GCS prefix (e.g., lancedb_batch_handbook_documents_0).
+        gcs_sync: GCSSync instance with bucket access.
+
+    Returns:
+        True if all blobs were deleted, False on error.
+    """
     try:
         blobs_to_delete = list(gcs_sync.bucket.list_blobs(prefix=f"{batch_prefix_name}/"))
         for blob in blobs_to_delete:
@@ -722,10 +760,15 @@ def _cleanup_batch_from_gcs(batch_prefix_name: str, gcs_sync: Any) -> bool:
 
 
 async def merge_batches(request: Request) -> JSONResponse:
-    """Merge all batch ChromaDBs into the main collection.
+    """Merge all batch LanceDB tables from GCS into the main store.
 
-    This endpoint consolidates parallel batch processing results.
-    Call after all batch tasks have completed.
+    Expects JSON body: collection_name (optional), cleanup (optional, default True).
+    Lists GCS prefixes matching lancedb_batch_{collection}_*, connects to each
+    LanceDB URI, and adds documents to the main store. Optionally deletes batch
+    prefixes from GCS after merge.
+
+    Returns:
+        JSONResponse with status, merged_count, batches_merged, batches_cleaned.
     """
     try:
         body = await request.json()
@@ -748,7 +791,6 @@ async def merge_batches(request: Request) -> JSONResponse:
 
         gcs_sync = GCSSync(bucket_name=gcs_bucket, project_id=gcs_project)
 
-        # List and extract batch prefixes
         batch_prefix = f"{BATCH_PREFIX_PATTERN}{collection_name}_"
         blobs = list(gcs_sync.bucket.list_blobs(prefix=batch_prefix))
         batch_prefixes = _extract_batch_prefixes(blobs)
@@ -764,36 +806,26 @@ async def merge_batches(request: Request) -> JSONResponse:
 
         logger.info("Found %d batches to merge", len(batch_prefixes))
 
-        # Create main vector store
         main_store = VectorStore(
-            persist_directory=f"/tmp/chroma_db_merged_{collection_name}",  # nosec B108
+            persist_directory="/tmp/lancedb",  # nosec B108 - unused when GCS set
             collection_name=collection_name,
             gcs_bucket_name=gcs_bucket,
             gcs_project_id=gcs_project,
         )
 
-        # Process all batches
         total_documents = 0
         merged_batches = []
 
         for batch_prefix_name in sorted(batch_prefixes):
             try:
-                doc_count = await _process_single_batch(batch_prefix_name, collection_name, gcs_sync, main_store)
+                doc_count = await _process_single_batch(batch_prefix_name, collection_name, gcs_bucket, main_store)
                 total_documents += doc_count
                 merged_batches.append(batch_prefix_name)
-            except (ValueError, KeyError, RuntimeError):
+            except (ValueError, KeyError, RuntimeError, OSError):
                 continue
 
-        # Sync merged store
-        final_prefix = f"chroma_db_{collection_name}"
-        await asyncio.get_event_loop().run_in_executor(
-            None,
-            main_store.sync_to_gcs,
-            final_prefix,
-        )
-        logger.info("Synced merged collection to GCS: %s", final_prefix)
+        # Main store is already at gs://bucket/lancedb; no sync needed
 
-        # Cleanup batch prefixes
         deleted_batches = [b for b in merged_batches if _cleanup_batch_from_gcs(b, gcs_sync)] if cleanup else []
 
         return JSONResponse(
@@ -803,7 +835,7 @@ async def merge_batches(request: Request) -> JSONResponse:
                 "batches_merged": len(merged_batches),
                 "total_documents": total_documents,
                 "batches_cleaned": len(deleted_batches) if cleanup else 0,
-                "final_gcs_prefix": final_prefix,
+                "final_uri": main_store.uri,
             }
         )
 

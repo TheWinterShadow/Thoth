@@ -1,10 +1,15 @@
+---
+description: 
+alwaysApply: true
+---
+
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
 
-Thoth is a semantic search system for handbook documentation with an MCP (Model Context Protocol) server for AI assistant integration. It provides vector-based semantic search over documents using ChromaDB and sentence-transformers, deployed on Google Cloud Platform.
+Thoth is a semantic search system for handbook documentation with an MCP (Model Context Protocol) server for AI assistant integration. It provides vector-based semantic search over documents using LanceDB and sentence-transformers, deployed on Google Cloud Platform.
 
 ## Build & Development Commands
 
@@ -53,14 +58,14 @@ hatch run build              # Build wheel and sdist packages
 - `http_wrapper.py` - SSE transport wrapper for Cloud Run (Uvicorn/Starlette)
 
 **Shared Utilities** (`thoth/shared/`):
-- `vector_store.py` - ChromaDB wrapper with GCS backup
+- `vector_store.py` - LanceDB wrapper with native GCS support
 - `embedder.py` - sentence-transformers embedding generation
 - `cli.py` - Click-based CLI (`thoth` command)
 - `sources/config.py` - Multi-source registry (handbook, dnd, personal collections)
 
 ### Data Flow
 
-1. **Ingestion**: GitLab repo → Parser → Chunker (500-1000 tokens) → Embedder → ChromaDB → GCS backup
+1. **Ingestion**: GitLab repo → Parser → Chunker (500-1000 tokens) → Embedder → LanceDB (local or gs://) → GCS when using cloud
 2. **Query**: MCP request → LRU cache check → Query embedding → Vector similarity search → Results
 
 ### Entry Points
