@@ -33,7 +33,7 @@ dependencies = [
 "httpx",
 "PyMuPDF>=1.23.0",
 "python-docx>=1.1.0",
-"python-json-logger>=2.0.0",
+"python-json-logger>=3.0.0",
 ]
 authors = [
   { name = "TheWinterShadow", email = "elijah.j.winter@outlook.com" },

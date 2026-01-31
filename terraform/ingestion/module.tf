@@ -44,6 +44,11 @@ variable "huggingface_token_secret_id" {
   type        = string
 }
 
+variable "container_image" {
+  description = "Container image for ingestion worker (e.g., gcr.io/project-id/thoth-ingestion:abc123)"
+  type        = string
+}
+
 # Data source for project information
 data "google_project" "current" {
   project_id = var.project_id

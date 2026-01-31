@@ -18,7 +18,7 @@ resource "google_cloud_run_v2_service" "thoth_ingestion_worker" {
     timeout = "3600s" # 1 hour for batch processing
 
     containers {
-      image = "gcr.io/${var.project_id}/thoth-ingestion:latest"
+      image = var.container_image
 
       ports {
         name           = "http1"
