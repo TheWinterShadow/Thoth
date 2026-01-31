@@ -1,5 +1,5 @@
 # Lightweight build for Thoth MCP Server (no ingestion)
-FROM python:3.11-slim as builder
+FROM python:3.12-slim AS builder
 
 WORKDIR /build
 
@@ -15,17 +15,19 @@ COPY thoth/__about__.py ./thoth/__about__.py
 # Install MCP server dependencies including embedder requirements
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir \
-        "mcp>=1.0.0" \
-        "chromadb>=0.4.0,<0.6.0" \
-        "google-cloud-storage>=2.0.0" \
-        "google-cloud-secret-manager>=2.0.0" \
-        "fastapi>=0.100.0" \
-        "uvicorn[standard]>=0.23.0" \
-        "sse-starlette>=1.6.0" \
-        "gitpython>=3.1.0" \
-        "sentence-transformers>=2.2.0" \
-        "torch>=2.6.0" \
-        "python-json-logger>=2.0.0"
+        "mcp>=1.26.0" \
+        "lancedb>=0.4.0" \
+        "pyarrow>=14.0.0" \
+        "google-cloud-storage>=3.7.0" \
+        "google-cloud-secret-manager>=2.26.0" \
+        "starlette>=0.52.1" \
+        "uvicorn[standard]>=0.40.0" \
+        "sse-starlette>=3.2.0" \
+        "gitpython>=3.1.46" \
+        "sentence-transformers>=5.2.2" \
+        "torch>=2.10.0" \
+        "httpx>=0.28.1" \
+        "python-json-logger>=4.0.0"
 
 # Copy source code (only MCP server parts)
 COPY thoth/__init__.py thoth/__about__.py ./thoth/
@@ -39,7 +41,7 @@ COPY thoth/shared/utils ./thoth/shared/utils/
 COPY thoth/shared/sources ./thoth/shared/sources/
 
 # Runtime stage
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
@@ -49,14 +51,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy Python packages from builder
-COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Copy only MCP server code
 COPY --from=builder /build/thoth /app/thoth
 
-# Create minimal directories
-RUN mkdir -p /app/data/chroma_db
+# Create minimal directories (LanceDB local store / handbook_vectors)
+RUN mkdir -p /app/data/lancedb /app/data/handbook_vectors
 
 # Environment variables
 ENV PYTHONUNBUFFERED=1 \

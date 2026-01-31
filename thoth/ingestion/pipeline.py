@@ -33,7 +33,21 @@ DEFAULT_BATCH_SIZE = 50  # Process files in batches
 
 @dataclass
 class PipelineState:
-    """Tracks the state of the ingestion pipeline."""
+    """Mutable state for a single pipeline run (resume and progress tracking).
+
+    Persisted to pipeline_state.json so runs can resume after interruption.
+    Tracks last processed commit, file lists, chunk counts, and completion flag.
+
+    Attributes:
+        last_commit: Last Git commit processed (for incremental sync).
+        processed_files: List of file paths successfully processed.
+        failed_files: Dict of file_path -> error_message for failed files.
+        total_chunks: Total chunks created this run.
+        total_documents: Total documents (chunks) added to the vector store.
+        start_time: ISO timestamp when run started.
+        last_update_time: ISO timestamp of last state save.
+        completed: True when the run finished without error.
+    """
 
     last_commit: str | None = None
     processed_files: list[str] = field(default_factory=list)
@@ -45,7 +59,12 @@ class PipelineState:
     completed: bool = False
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert state to dictionary."""
+        """Serialize state to a dict for JSON persistence.
+
+        Returns:
+            Dict with last_commit, processed_files, failed_files, total_chunks,
+            total_documents, start_time, last_update_time, completed.
+        """
         return {
             "last_commit": self.last_commit,
             "processed_files": self.processed_files,
@@ -59,7 +78,14 @@ class PipelineState:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "PipelineState":
-        """Create state from dictionary."""
+        """Deserialize state from a dict (e.g., from pipeline_state.json).
+
+        Args:
+            data: Dict with keys matching PipelineState attributes.
+
+        Returns:
+            PipelineState instance with restored values.
+        """
         return cls(
             last_commit=data.get("last_commit"),
             processed_files=data.get("processed_files", []),
@@ -74,7 +100,21 @@ class PipelineState:
 
 @dataclass
 class PipelineStats:
-    """Statistics from pipeline execution."""
+    """Read-only statistics from a completed pipeline run.
+
+    Returned by run() and used for logging and monitoring. All counts and
+    rates are computed at the end of the run.
+
+    Attributes:
+        total_files: Total files discovered for processing.
+        processed_files: Files successfully processed.
+        failed_files: Files that failed (with errors).
+        total_chunks: Chunks created and stored.
+        total_documents: Documents (chunks) in the vector store after run.
+        duration_seconds: Elapsed time in seconds.
+        chunks_per_second: Throughput (chunks / duration).
+        files_per_second: Throughput (files / duration).
+    """
 
     total_files: int
     processed_files: int
@@ -111,7 +151,7 @@ class IngestionPipeline:
         vector_store: VectorStore | None = None,
         state_file: Path | None = None,
         batch_size: int = DEFAULT_BATCH_SIZE,
-        logger_instance: logging.Logger | None = None,
+        logger_instance: logging.Logger | logging.LoggerAdapter | None = None,
         collection_name: str = "thoth_documents",
         source_config: SourceConfig | None = None,
     ):
@@ -125,14 +165,15 @@ class IngestionPipeline:
             state_file: Path to state file for resume capability
             batch_size: Number of files to process in each batch
             logger_instance: Logger instance for logging
-            collection_name: Name of the ChromaDB collection to use
+            collection_name: Name of the vector store table (collection) to use
             source_config: Source configuration for multi-source support
         """
-        self.repo_manager = repo_manager or HandbookRepoManager()
-        self.chunker = chunker or MarkdownChunker()
-        self.document_chunker = DocumentChunker()  # Generalized chunker for all formats
-        self.embedder = embedder or Embedder()
+        self.logger = logger_instance or logger
         self.source_config = source_config
+        self.repo_manager = repo_manager or HandbookRepoManager(logger=self.logger)
+        self.chunker = chunker or MarkdownChunker(logger=self.logger)
+        self.document_chunker = DocumentChunker(logger=self.logger)  # Generalized chunker for all formats
+        self.embedder = embedder or Embedder(logger_instance=self.logger)
         # Use collection name from source config if provided
         self.collection_name = source_config.collection_name if source_config else collection_name
         self.source_name = source_config.name if source_config else ""
@@ -144,35 +185,36 @@ class IngestionPipeline:
 
         if gcs_bucket and gcs_project:
             # Cloud Run: use GCS for repository storage
-            logger.info("Cloud Run detected - using GCS for repository sync")
+            self.logger.info("Cloud Run detected - using GCS for repository sync")
             repo_url = os.getenv("GITLAB_BASE_URL", "https://gitlab.com") + "/gitlab-com/content-sites/handbook.git"
             self.gcs_repo_sync = GCSRepoSync(
                 bucket_name=gcs_bucket,
                 repo_url=repo_url,
                 gcs_prefix="handbook",
                 local_path=Path("/tmp/handbook"),  # nosec B108 - Cloud Run requires /tmp
+                logger_instance=self.logger,
             )
 
         # Auto-configure vector store for Cloud Run environment
         if vector_store is None:
             if gcs_bucket and gcs_project:
                 # Cloud Run: use /tmp for local cache and sync with GCS
-                logger.info(f"Cloud Run detected - using GCS bucket: {gcs_bucket}")
+                self.logger.info(f"Cloud Run detected - using GCS bucket: {gcs_bucket}")
                 self.vector_store = VectorStore(
-                    persist_directory="/tmp/chroma_db",  # nosec B108 - Cloud Run requires /tmp
+                    persist_directory="/tmp/lancedb",  # nosec B108 - Cloud Run uses GCS URI
                     collection_name=collection_name,
                     gcs_bucket_name=gcs_bucket,
                     gcs_project_id=gcs_project,
+                    logger_instance=self.logger,
                 )
             else:
-                # Local: use default chroma_db directory
-                self.vector_store = VectorStore(collection_name=collection_name)
+                # Local: use default lancedb directory
+                self.vector_store = VectorStore(collection_name=collection_name, logger_instance=self.logger)
         else:
             self.vector_store = vector_store
 
         self.state_file = state_file or (self.repo_manager.clone_path.parent / DEFAULT_STATE_FILE)
         self.batch_size = batch_size
-        self.logger = logger_instance or logger
 
         self.state = self._load_state()
 
@@ -590,7 +632,7 @@ class IngestionPipeline:
         total_chunks = 0
 
         for i, file_path in enumerate(modified_files):
-            file_str = str(file_path.relative_to(self.repo_manager.clone_path))
+            file_str = str(file_path.relative_to(self.effective_repo_path))
 
             try:
                 # Step 1: Delete old documents for this file
@@ -675,8 +717,8 @@ class IngestionPipeline:
         """Run the complete ingestion pipeline.
 
         Args:
-            force_reclone: If True, remove and re-clone the repository
-            incremental: If True, only process changed files (requires previous state)
+            force_reclone: If True, force re-sync from GCS (or re-clone if no GCS)
+            incremental: If True, only process files not already in state
             progress_callback: Optional callback(current, total, status_msg) for progress
 
         Returns:
@@ -690,27 +732,43 @@ class IngestionPipeline:
         self.logger.info("Starting ingestion pipeline")
 
         try:
-            # Step 1: Clone or update repository
+            # Step 1: Get repository files (from GCS or local clone)
             if progress_callback:
-                progress_callback(0, 100, "Cloning/updating repository...")
+                progress_callback(0, 100, "Syncing repository...")
 
-            if not self.repo_manager.is_valid_repo() or force_reclone:
-                self.logger.info("Cloning repository...")
-                self.repo_manager.clone_handbook(force=force_reclone)
+            if self.gcs_repo_sync:
+                # Cloud Run: sync from GCS (never clone directly)
+                self.logger.info("Syncing repository from GCS...")
+                sync_result = self.gcs_repo_sync.sync_to_local(force=force_reclone)
+                self.logger.info(
+                    "GCS sync complete: %s (%s files)",
+                    sync_result.get("status"),
+                    sync_result.get("files_downloaded", sync_result.get("file_count", "?")),
+                )
+                repo_path = self.gcs_repo_sync.get_local_path()
+                # GCS sync doesn't have git history, use a placeholder commit
+                current_commit = "gcs-sync"
             else:
-                self.logger.info("Updating repository...")
-                self.repo_manager.update_repository()
+                # Local environment: use traditional git clone
+                if not self.repo_manager.is_valid_repo() or force_reclone:
+                    self.logger.info("Cloning repository...")
+                    self.repo_manager.clone_handbook(force=force_reclone)
+                else:
+                    self.logger.info("Updating repository...")
+                    self.repo_manager.update_repository()
 
-            current_commit = self.repo_manager.get_current_commit()
-            if not current_commit:
-                msg = "Failed to get current commit"
-                raise RuntimeError(msg)
+                commit_or_none = self.repo_manager.get_current_commit()
+                if not commit_or_none:
+                    msg = "Failed to get current commit"
+                    raise RuntimeError(msg)
+                current_commit = commit_or_none
+                repo_path = self.repo_manager.clone_path
 
             # Step 2: Discover files to process
             if progress_callback:
                 progress_callback(10, 100, "Discovering markdown files...")
 
-            all_files = self._discover_markdown_files(self.repo_manager.clone_path)
+            all_files = self._discover_markdown_files(repo_path)
 
             # Initialize file lists
             files_to_process: list[Path] = []
@@ -719,7 +777,17 @@ class IngestionPipeline:
             modified_files_list: list[Path] = []
 
             # Filter files for incremental processing
-            if incremental and self.state.last_commit:
+            # For GCS mode: use file-based incremental (skip already processed files)
+            # For git mode: use commit-based incremental (diff against last commit)
+            use_git_incremental = (
+                incremental
+                and self.state.last_commit
+                and self.state.last_commit != "gcs-sync"
+                and not self.gcs_repo_sync
+            )
+
+            if use_git_incremental and self.state.last_commit:
+                # Git-based incremental: use commit diff
                 file_changes = self.repo_manager.get_file_changes(self.state.last_commit)
                 if file_changes is not None:
                     # Filter for markdown files only
@@ -728,22 +796,14 @@ class IngestionPipeline:
                     deleted_md = [f for f in file_changes["deleted"] if f.endswith(".md")]
 
                     # Convert to Path objects for added and modified
-                    added_files_list = [
-                        self.repo_manager.clone_path / f
-                        for f in added_md
-                        if (self.repo_manager.clone_path / f).exists()
-                    ]
-                    modified_files_list = [
-                        self.repo_manager.clone_path / f
-                        for f in modified_md
-                        if (self.repo_manager.clone_path / f).exists()
-                    ]
+                    added_files_list = [repo_path / f for f in added_md if (repo_path / f).exists()]
+                    modified_files_list = [repo_path / f for f in modified_md if (repo_path / f).exists()]
 
                     files_to_process = added_files_list + modified_files_list
                     deleted_files = deleted_md
 
                     self.logger.info(
-                        "Incremental mode: %d added, %d modified, %d deleted markdown files",
+                        "Git incremental mode: %d added, %d modified, %d deleted",
                         len(added_files_list),
                         len(modified_files_list),
                         len(deleted_files),
@@ -753,6 +813,18 @@ class IngestionPipeline:
                     files_to_process = all_files
                     added_files_list = all_files
                     modified_files_list = []
+            elif incremental and self.state.processed_files:
+                # File-based incremental: skip already processed files
+                # This works for both GCS mode and when git diff fails
+                processed_set = set(self.state.processed_files)
+                added_files_list = [f for f in all_files if str(f.relative_to(repo_path)) not in processed_set]
+                files_to_process = added_files_list
+                modified_files_list = []
+                self.logger.info(
+                    "File-based incremental: %d new files to process (%d already done)",
+                    len(added_files_list),
+                    len(processed_set),
+                )
             else:
                 files_to_process = all_files
                 added_files_list = all_files

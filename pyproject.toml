@@ -10,30 +10,31 @@ name = "thoth"
 dynamic = ["version"]
 description = "DESCRIPTION"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.13"
 license = "MIT"
 keywords = [""]
 dependencies = [
-"mcp",
-"gitpython>=3.1.0",
-"chromadb>=0.4.0,<0.6.0",
-"sentence-transformers>=2.2.0",
-"torch>=2.6.0",
-"click>=8.1.0",
-"rich>=13.0.0",
-"requests>=2.31.0",
-"apscheduler>=3.10.0",
-"google-cloud-storage>=2.10.0",
-"google-cloud-secret-manager>=2.16.0",
-"google-cloud-tasks>=2.14.0",
-"google-cloud-firestore>=2.14.0",
-"starlette>=0.37.0",
-"uvicorn[standard]>=0.27.0",
-"sse-starlette>=1.6.0",
-"httpx",
-"PyMuPDF>=1.23.0",
-"python-docx>=1.1.0",
-"python-json-logger>=2.0.0",
+"mcp>=1.26.0",
+"lancedb>=0.4.0",
+"pyarrow>=14.0.0",
+"gitpython>=3.1.46",
+"sentence-transformers>=5.2.2",
+"torch>=2.10.0",
+"click>=8.3.1",
+"rich>=14.3.1",
+"requests>=2.32.5",
+"apscheduler>=3.11.2",
+"google-cloud-storage>=3.7.0",
+"google-cloud-secret-manager>=2.26.0",
+"google-cloud-tasks>=2.16.0",
+"google-cloud-firestore>=2.23.0",
+"starlette>=0.52.1",
+"uvicorn[standard]>=0.40.0",
+"sse-starlette>=3.2.0",
+"httpx>=0.28.1",
+"PyMuPDF>=1.26.7",
+"python-docx>=1.2.0",
+"python-json-logger>=4.0.0",
 ]
 authors = [
   { name = "TheWinterShadow", email = "elijah.j.winter@outlook.com" },
@@ -45,10 +46,7 @@ classifiers = [
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
   "Programming Language :: Python",
-  "Programming Language :: Python :: 3.10",
-  "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
-  "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: Implementation :: CPython",
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
@@ -67,44 +65,44 @@ thoth = "thoth.shared.cli:cli"
 
 # Development dependencies
 dev = [
-  "black>=23.0.0",
-  "ruff>=0.1.0",
-  "mypy>=1.0.0",
-  "pytest>=7.0.0",
-  "pytest-cov>=4.0.0",
-  "pytest-asyncio>=0.23.0",
-  "bandit>=1.7.0",
-  "pre-commit>=3.0.0",
-  "sphinx>=5.0.0",
-  "furo>=2023.0.0",
-  "mcp",
-  "types-requests>=2.31.0",
-  "httpx",
+  "black>=26.1.0",
+  "ruff>=0.14.14",
+  "mypy>=1.19.1",
+  "pytest>=9.0.2",
+  "pytest-cov>=7.0.0",
+  "pytest-asyncio>=1.3.0",
+  "bandit>=1.9.3",
+  "pre-commit>=4.0.0",
+  "sphinx>=9.1.0",
+  "furo>=2025.12.19",
+  "mcp>=1.26.0",
+  "types-requests>=2.32.4",
+  "httpx>=0.28.1",
 ]
 
 # Documentation dependencies
 docs = [
-  "sphinx>=5.0.0",
-  "furo>=2023.0.0",
-  "myst-parser>=2.0.0",
+  "sphinx>=9.1.0",
+  "furo>=2025.12.19",
+  "myst-parser>=4.0.0",
 ]
 
 # All optional dependencies combined
 all = [
-  "black>=23.0.0",
-  "ruff>=0.1.0",
-  "mypy>=1.0.0",
-  "pytest>=7.0.0",
-  "pytest-cov>=4.0.0",
-  "pytest-asyncio>=0.23.0",
-  "bandit>=1.7.0",
-  "pre-commit>=3.0.0",
-  "sphinx>=5.0.0",
-  "furo>=2.0.0",
-  "myst-parser>=2.0.0",
-  "mcp",
-  "httpx",
-  "types-requests>=2.31.0",
+  "black>=26.1.0",
+  "ruff>=0.14.14",
+  "mypy>=1.19.1",
+  "pytest>=9.0.2",
+  "pytest-cov>=7.0.0",
+  "pytest-asyncio>=1.3.0",
+  "bandit>=1.9.3",
+  "pre-commit>=4.0.0",
+  "sphinx>=9.1.0",
+  "furo>=2025.12.19",
+  "myst-parser>=4.0.0",
+  "mcp>=1.26.0",
+  "httpx>=0.28.1",
+  "types-requests>=2.32.4",
 ]
 
 
@@ -139,40 +137,40 @@ exclude = [
 # ==============================================================================
 [tool.hatch.envs.default]
 dependencies = [
-  "mypy>=1.0.0",
-  "types-requests>=2.31.0",
+  "mypy>=1.19.1",
+  "types-requests>=2.32.4",
 ]
 
 [tool.hatch.envs.dev]
 dependencies = [
   # Core dependencies (needed for type checking)
   # Documentation
-  "sphinx",
-  "furo",
-  "myst-parser", 
+  "sphinx>=9.1.0",
+  "furo>=2025.12.19",
+  "myst-parser>=4.0.0",
   # Type stubs for better IDE support and mypy
-  "types-requests>=2.31.0",
+  "types-requests>=2.32.4",
 
   # Code formatting and linting
-  "black",
-  "ruff",
-  "mypy",
-  "pre-commit",
+  "black>=26.1.0",
+  "ruff>=0.14.14",
+  "mypy>=1.19.1",
+  "pre-commit>=4.0.0",
   # Testing
-  "pytest",
-  "coverage[toml]>=6.5",
+  "pytest>=9.0.2",
+  "coverage[toml]>=7.6.0",
   # Security
-  "bandit",
+  "bandit>=1.9.3",
 ]
 
 [tool.hatch.envs.lint]
 dependencies = [
-  "black",
-  "ruff",
-  "mypy",
-  "bandit",
-  "pre-commit",
-  "types-requests>=2.31.0",
+  "black>=26.1.0",
+  "ruff>=0.14.14",
+  "mypy>=1.19.1",
+  "bandit>=1.9.3",
+  "pre-commit>=4.0.0",
+  "types-requests>=2.32.4",
 ]
 
 [tool.hatch.envs.lint.scripts]
@@ -194,9 +192,9 @@ precommit = [
 
 [tool.hatch.envs.docs]
 dependencies = [
-  "sphinx>=7.0",
+  "sphinx>=9.1.0",
   "shibuya",
-  "myst-parser",
+  "myst-parser>=4.0.0",
   "sphinxcontrib-mermaid",
   "sphinxcontrib-redoc",
 ]
@@ -217,9 +215,9 @@ precommit-run = [
 [tool.hatch.envs.hatch-test]
 dependencies = [
     # Core dependencies
-    "pytest",
-    "pytest-cov",
-    "pytest-asyncio",
+    "pytest>=9.0.2",
+    "pytest-cov>=7.0.0",
+    "pytest-asyncio>=1.3.0",
 ]
 
 # Keep test environment for backwards compatibility
@@ -301,7 +299,7 @@ serve = "python -m http.server 8000 --directory docs/build"
 
 
 [[tool.hatch.envs.all.matrix]]
-python = ["3.10", "3.11", "3.12", "3.13"]
+python = ["3.12"]
 
 # ==============================================================================
 # TOOL CONFIGURATION
@@ -457,7 +455,7 @@ force-sort-within-sections = true
 
 # Type checking configuration
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true

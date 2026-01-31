@@ -55,11 +55,8 @@ flowchart LR
         MY[MyPy]
     end
 
-    subgraph Test["Test (3.10-3.13)"]
-        P10[Python 3.10]
-        P11[Python 3.11]
+    subgraph Test["Test (3.12)"]
         P12[Python 3.12]
-        P13[Python 3.13]
     end
 
     subgraph Build["Build"]
@@ -184,7 +181,7 @@ terraform/
 ### MCP Server Image (`Dockerfile.mcp`)
 
 ```dockerfile
-FROM python:3.11-slim
+FROM python:3.12-slim
 WORKDIR /app
 COPY . .
 RUN pip install .
@@ -195,7 +192,7 @@ CMD ["python", "-m", "thoth.mcp.http_wrapper"]
 ### Ingestion Worker Image (`Dockerfile.ingestion`)
 
 ```dockerfile
-FROM python:3.11-slim
+FROM python:3.12-slim
 WORKDIR /app
 COPY . .
 RUN pip install .

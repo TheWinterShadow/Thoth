@@ -4,7 +4,7 @@ import json
 import logging
 from pathlib import Path
 import unittest
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import ANY, MagicMock, mock_open, patch
 
 from git import GitCommandError, InvalidGitRepositoryError
 
@@ -49,7 +49,13 @@ class TestHandbookRepoManager(unittest.TestCase):
 
         result = self.manager.clone_handbook()
 
-        mock_repo_class.clone_from.assert_called_once_with(self.test_repo_url, str(self.test_clone_path))
+        mock_repo_class.clone_from.assert_called_once_with(
+            self.test_repo_url,
+            str(self.test_clone_path),
+            progress=ANY,  # CloneProgress instance
+            depth=1,
+            single_branch=True,
+        )
         self.assertEqual(result, self.test_clone_path)
         mock_rmtree.assert_not_called()
 

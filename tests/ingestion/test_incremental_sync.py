@@ -2,7 +2,7 @@
 
 import contextlib
 import json
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
@@ -244,36 +244,57 @@ class TestIncrementalSync:
         assert "file2.md" in pipeline.state.failed_files
         assert "Delete failed" in pipeline.state.failed_files["file2.md"]
 
-    def test_vector_store_delete_by_file_path(self):
-        """Test the new delete_by_file_path method."""
-        # Create a real vector store with mock collection
-        vector_store = VectorStore(persist_directory=":memory:")
+    def test_vector_store_delete_by_file_path(self, tmp_path):
+        """Test delete_by_file_path removes documents with the given file_path."""
+        mock_embedder = MagicMock()
+        mock_embedder.model_name = "mock-model"
+        mock_embedder.get_embedding_dimension.return_value = 384
+        mock_embedder.embed.side_effect = lambda texts, **kwargs: [[0.1] * 384] * len(texts)
+        mock_embedder.embed_single.return_value = [0.1] * 384
 
-        # Mock the collection
-        mock_collection = Mock()
-        mock_collection.get.return_value = {"ids": ["id1", "id2", "id3"]}
-        vector_store.collection = mock_collection
+        vector_store = VectorStore(
+            persist_directory=str(tmp_path),
+            collection_name="test_collection",
+            embedder=mock_embedder,
+        )
+        vector_store.add_documents(
+            documents=["doc 1", "doc 2", "doc 3"],
+            ids=["id1", "id2", "id3"],
+            metadatas=[
+                {"file_path": "test/file.md"},
+                {"file_path": "test/file.md"},
+                {"file_path": "test/file.md"},
+            ],
+        )
+        assert vector_store.get_document_count() == 3
 
-        # Execute
         count = vector_store.delete_by_file_path("test/file.md")
 
-        # Verify
         assert count == 3
-        mock_collection.get.assert_called_with(where={"file_path": "test/file.md"})
-        mock_collection.delete.assert_called_with(where={"file_path": "test/file.md"})
+        assert vector_store.get_document_count() == 0
 
-    def test_vector_store_delete_by_file_path_no_documents(self):
-        """Test delete_by_file_path when no documents match."""
-        vector_store = VectorStore(persist_directory=":memory:")
+    def test_vector_store_delete_by_file_path_no_documents(self, tmp_path):
+        """Test delete_by_file_path when no documents match returns 0."""
+        mock_embedder = MagicMock()
+        mock_embedder.model_name = "mock-model"
+        mock_embedder.get_embedding_dimension.return_value = 384
+        mock_embedder.embed.side_effect = lambda texts, **kwargs: [[0.1] * 384] * len(texts)
+        mock_embedder.embed_single.return_value = [0.1] * 384
 
-        mock_collection = Mock()
-        mock_collection.get.return_value = {"ids": []}
-        vector_store.collection = mock_collection
+        vector_store = VectorStore(
+            persist_directory=str(tmp_path),
+            collection_name="test_collection",
+            embedder=mock_embedder,
+        )
+        vector_store.add_documents(
+            documents=["doc 1"],
+            metadatas=[{"file_path": "other/path.md"}],
+        )
 
         count = vector_store.delete_by_file_path("nonexistent.md")
 
         assert count == 0
-        mock_collection.delete.assert_not_called()
+        assert vector_store.get_document_count() == 1
 
     def test_renamed_files_handled_correctly(self, tmp_path):
         """Test that renamed files are handled as delete + add."""

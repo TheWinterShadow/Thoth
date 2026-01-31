@@ -16,7 +16,7 @@ This guide provides information for developers who want to contribute to the Tho
 
 ### Prerequisites
 
-- Python 3.9 or higher
+- Python 3.10 to 3.12 (Python 3.13 is not yet supported by dependencies)
 - Git
 - A text editor or IDE (VS Code recommended)
 
@@ -35,7 +35,7 @@ This guide provides information for developers who want to contribute to the Tho
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    
    # Or using conda
-   conda create -n thoth python=3.9
+   conda create -n thoth python=3.11
    conda activate thoth
    ```
 

@@ -34,7 +34,7 @@ class TestHealthCheck:
         imports = HealthCheck.check_imports()
 
         assert isinstance(imports, dict)
-        assert "chromadb" in imports
+        assert "lancedb" in imports
         assert "torch" in imports
         assert "sentence_transformers" in imports
         assert "mcp" in imports

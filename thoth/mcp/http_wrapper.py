@@ -24,14 +24,14 @@ logger = setup_logger(__name__)
 
 
 class HealthHTTPHandler(BaseHTTPRequestHandler):
-    """Simple HTTP handler for health checks.
+    """HTTP request handler for health checks (standalone health server).
 
-    Authentication is handled at the Cloud Run ingress level via IAM.
-    Requests reaching this handler have already passed IAM authentication.
+    Serves GET /health and GET / with JSON health status. Used when running
+    a health-only server. Authentication is handled at Cloud Run ingress via IAM.
     """
 
     def do_GET(self) -> None:
-        """Handle GET requests."""
+        """Handle GET: /health and / return JSON health status; others 404."""
         if self.path in {"/health", "/"}:
             try:
                 status = HealthCheck.get_health_status()
@@ -55,10 +55,16 @@ class HealthHTTPHandler(BaseHTTPRequestHandler):
 
 
 def run_health_server(port: int = 8080) -> None:
-    """Run HTTP health server.
+    """Run a blocking HTTP server that only serves health checks.
+
+    Binds to 0.0.0.0:port and serves GET /health and GET / with JSON health
+    status. Exits on KeyboardInterrupt.
 
     Args:
-        port: Port to listen on (default: 8080)
+        port: TCP port to listen on (default: 8080).
+
+    Returns:
+        None. Runs until interrupted.
     """
     server = HTTPServer(("0.0.0.0", port), HealthHTTPHandler)  # nosec B104
     logger.info("HTTP health server listening on port %d", port)
@@ -70,7 +76,15 @@ def run_health_server(port: int = 8080) -> None:
 
 
 def main() -> None:
-    """Main entry point for Cloud Run deployment."""
+    """Main entry point for MCP server on Cloud Run (SSE + health).
+
+    Creates ThothMCPServer, wraps it in an SSE Starlette app, adds /health and /
+    routes, and runs Uvicorn on port 8080. Use this when deploying the MCP
+    server to Cloud Run.
+
+    Returns:
+        None. Runs until process is killed.
+    """
     logger.info("Starting Thoth MCP Server (Cloud Run mode with SSE)")
 
     # Create MCP server instance

@@ -57,14 +57,19 @@ class ChunkMetadata:
     format: str = ""  # Document format (e.g., 'markdown', 'pdf', 'text', 'docx')
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert metadata to dictionary.
+        """Convert metadata to a dict suitable for vector store metadata columns.
 
-        Ensures all values are ChromaDB-compatible types (str, int, float, bool).
-        Lists are converted to comma-separated strings.
+        Ensures all values are store-compatible types (str, int, float, bool).
+        Lists (e.g., headers) are converted to comma-separated strings.
+
+        Returns:
+            Dict with chunk_id, file_path, chunk_index, total_chunks, headers (str),
+            start_line, end_line, token_count, char_count, timestamp, overlap flags,
+            source, format.
         """
 
         def sanitize_value(value: Any) -> str | int | float | bool:
-            """Convert any value to ChromaDB-compatible type."""
+            """Convert a value to a type supported by LanceDB/vector store metadata."""
             if isinstance(value, (str, int, float, bool)):
                 return value
             if isinstance(value, list):
@@ -92,7 +97,7 @@ class ChunkMetadata:
             "format": self.format,
         }
 
-        # Sanitize all values to ensure ChromaDB compatibility
+        # Sanitize all values so metadata is compatible with LanceDB/vector store.
         return {k: sanitize_value(v) for k, v in raw_dict.items()}
 
 
@@ -124,7 +129,7 @@ class MarkdownChunker:
         min_chunk_size: int = DEFAULT_MIN_CHUNK_SIZE,
         max_chunk_size: int = DEFAULT_MAX_CHUNK_SIZE,
         overlap_size: int = DEFAULT_OVERLAP_SIZE,
-        logger: logging.Logger | None = None,
+        logger: logging.Logger | logging.LoggerAdapter | None = None,
     ):
         """Initialize the markdown chunker.
 
@@ -181,6 +186,7 @@ class MarkdownChunker:
         Returns:
             List of chunks with metadata
         """
+        self.logger.debug(f"Chunking text from {source_path} ({len(text)} chars)")
         if not text.strip():
             return []
 
@@ -193,6 +199,7 @@ class MarkdownChunker:
         # Create chunks with metadata
         chunks = self._create_chunks(chunk_groups, source_path)
 
+        self.logger.debug(f"Created {len(chunks)} chunks for {source_path}")
         # Add overlaps
         return self._add_overlaps(chunks)
 
@@ -518,7 +525,7 @@ class DocumentChunker:
         min_chunk_size: int = DEFAULT_MIN_CHUNK_SIZE,
         max_chunk_size: int = DEFAULT_MAX_CHUNK_SIZE,
         overlap_size: int = DEFAULT_OVERLAP_SIZE,
-        logger: logging.Logger | None = None,
+        logger: logging.Logger | logging.LoggerAdapter | None = None,
     ):
         """Initialize the document chunker.
 
@@ -559,6 +566,7 @@ class DocumentChunker:
         Returns:
             List of chunks with metadata including source and format
         """
+        self.logger.debug(f"Chunking document {source_path} (format: {doc_format}, length: {len(content)})")
         if not content.strip():
             return []
 
@@ -574,6 +582,7 @@ class DocumentChunker:
             chunk.metadata.source = source
             chunk.metadata.format = doc_format
 
+        self.logger.debug(f"Created {len(chunks)} chunks for {source_path}")
         return chunks
 
     def chunk_file(self, file_path: Path, source: str = "", doc_format: str = "markdown") -> list[Chunk]:

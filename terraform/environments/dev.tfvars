@@ -4,6 +4,8 @@ region     = "us-central1"
 environment = "dev"
 
 # Container Images (REQUIRED)
+# Note: CI/CD overrides these with commit SHA for deployments
+# Use :latest only for local development/testing
 mcp_container_image        = "gcr.io/thoth-dev-485501/thoth-mcp:latest"
 ingestion_container_image  = "gcr.io/thoth-dev-485501/thoth-ingestion:latest"
 

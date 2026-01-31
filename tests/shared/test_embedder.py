@@ -1,5 +1,8 @@
 """Tests for the Embedder class."""
 
+from unittest.mock import MagicMock, patch
+
+import numpy as np
 import pytest
 
 from thoth.shared.embedder import Embedder
@@ -7,6 +10,37 @@ from thoth.shared.embedder import Embedder
 
 class TestEmbedder:
     """Test suite for the Embedder class."""
+
+    @pytest.fixture(autouse=True)
+    def mock_sentence_transformer(self):
+        """Mock SentenceTransformer to avoid downloading models."""
+        with patch("thoth.shared.embedder.SentenceTransformer") as mock_cls:
+            mock_instance = MagicMock()
+            mock_cls.return_value = mock_instance
+
+            # Setup default behaviors
+            mock_instance.device = "cpu"
+            mock_instance.max_seq_length = 128
+            mock_instance.get_sentence_embedding_dimension.return_value = 384
+
+            # Mock encode to return numpy array of correct shape
+            def mock_encode(texts, *args, **kwargs):
+                batch_size = len(texts)
+                # Return random embeddings
+                embeddings = np.random.rand(batch_size, 384).astype(np.float32)
+
+                # Normalize if requested (default True in Embedder)
+                if kwargs.get("normalize_embeddings", True):
+                    norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+                    # Avoid division by zero
+                    norms[norms == 0] = 1e-10
+                    embeddings = embeddings / norms
+
+                return embeddings
+
+            mock_instance.encode.side_effect = mock_encode
+
+            yield mock_instance
 
     @pytest.fixture
     def embedder(self):
@@ -94,6 +128,26 @@ class TestEmbedder:
         text1 = "The cat sits on the mat."
         text2 = "A cat is sitting on a mat."
         text3 = "The weather is nice today."
+
+        # Configure mock to return specific vectors for this test
+        # v1 and v2 are similar (dot product ~0.9), v3 is orthogonal (dot product 0)
+        v1 = np.array([1.0, 0.0, 0.0] + [0.0] * 381, dtype=np.float32)
+        v2 = np.array([0.9, 0.4, 0.0] + [0.0] * 381, dtype=np.float32)
+        v3 = np.array([0.0, 1.0, 0.0] + [0.0] * 381, dtype=np.float32)
+
+        # Normalize
+        v1 /= np.linalg.norm(v1)
+        v2 /= np.linalg.norm(v2)
+        v3 /= np.linalg.norm(v3)
+
+        mapping = {text1: v1, text2: v2, text3: v3}
+
+        def custom_encode(texts, *args, **kwargs):
+            # Return mapped vectors or random ones
+            vectors = [mapping.get(t, np.random.rand(384).astype(np.float32)) for t in texts]
+            return np.array(vectors)
+
+        embedder.model.encode.side_effect = custom_encode
 
         emb1 = embedder.embed_single(text1)
         emb2 = embedder.embed_single(text2)

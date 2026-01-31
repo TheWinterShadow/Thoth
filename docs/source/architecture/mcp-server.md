@@ -28,7 +28,7 @@ flowchart TB
         CA[Query Cache]
     end
 
-    subgraph Collections["ChromaDB Collections"]
+    subgraph Collections["LanceDB Tables"]
         HB[(handbook_documents)]
         DND[(dnd_documents)]
         PER[(personal_documents)]
@@ -56,7 +56,7 @@ sequenceDiagram
     participant MCP as MCP Server
     participant Tools as Tool Handlers
     participant Cache as Query Cache
-    participant DB as ChromaDB Collections
+    participant DB as LanceDB Tables
 
     Client->>SSE: GET /sse (establish connection)
     SSE-->>Client: SSE stream opened
@@ -243,12 +243,10 @@ Each collection is synced from GCS at startup:
 
 ```python
 # GCS prefix pattern for collections
-COLLECTION_GCS_PREFIX_PATTERN = "chroma_db_{collection_name}"
+# LanceDB uses single GCS path: gs://bucket/lancedb with one table per collection
 
 # Example prefixes:
-# - chroma_db_handbook_documents
-# - chroma_db_dnd_documents
-# - chroma_db_personal_documents
+# - Tables: thoth_documents, dnd_documents, personal_documents in gs://bucket/lancedb
 ```
 
 The server handles missing collections gracefully - if a collection doesn't exist in GCS, it's skipped during initialization and searches return empty results for that source.
@@ -306,7 +304,7 @@ Environment variables:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `LOG_LEVEL` | `INFO` | Logging verbosity |
-| `CHROMA_PATH` | `/tmp/chroma` | ChromaDB storage path |
+| `base_db_path` | `./vector_dbs` | LanceDB local path or GCS bucket (Cloud Run) |
 | `GCS_BUCKET_NAME` | - | GCS bucket for DB sync |
 | `GCP_PROJECT_ID` | - | GCP project ID |
 | `CACHE_SIZE` | `100` | Max cache entries |

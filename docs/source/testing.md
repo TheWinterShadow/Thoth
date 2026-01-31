@@ -18,7 +18,7 @@ tests/
 │   ├── test_mcp_server.py           # Tool execution, search, caching
 │   └── test_http_wrapper.py         # HTTP transport tests
 └── shared/                          # Shared utility tests
-    ├── test_vector_store.py         # ChromaDB operations
+    ├── test_vector_store.py         # LanceDB operations
     ├── test_embedder.py             # Embedding generation
     ├── test_cli.py                  # CLI commands
     └── utils/                       # Utility tests
@@ -164,7 +164,7 @@ def sample_markdown():
 
 @pytest.fixture
 def temp_vector_store(tmp_path):
-    return VectorStore(path=tmp_path / "chroma")
+    return VectorStore(persist_directory=str(tmp_path / "lancedb"))
 
 @pytest.fixture
 def mock_embedder(mocker):
@@ -182,7 +182,7 @@ Tests run automatically in GitHub Actions:
 test:
   strategy:
     matrix:
-      python-version: ["3.10", "3.11", "3.12", "3.13"]
+      python-version: ["3.12"]
   steps:
     - name: Run tests
       run: hatch test

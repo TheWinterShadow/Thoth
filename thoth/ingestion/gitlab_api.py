@@ -387,6 +387,7 @@ class GitLabAPIClient:
         Returns:
             Project data
         """
+        self.logger.debug(f"Fetching project: {project_id}")
         encoded_project_id = quote(project_id, safe="") if "/" in project_id and "%" not in project_id else project_id
         endpoint = f"projects/{encoded_project_id}"
         return self.get(endpoint, use_cache=use_cache)
@@ -405,6 +406,7 @@ class GitLabAPIClient:
         Returns:
             List of projects
         """
+        self.logger.debug("Listing projects")
         return self.get("projects", params=params, use_cache=use_cache)
 
     # =========================================================================
@@ -431,6 +433,7 @@ class GitLabAPIClient:
         Returns:
             List of repository tree items
         """
+        self.logger.debug(f"Fetching repository tree for {project_id} (path: {path}, ref: {ref})")
         endpoint = f"projects/{project_id}/repository/tree"
         params = {
             "path": path,
@@ -457,6 +460,7 @@ class GitLabAPIClient:
         Returns:
             File data including content
         """
+        self.logger.debug(f"Fetching file {file_path} from {project_id} (ref: {ref})")
         endpoint = f"projects/{project_id}/repository/files/{quote(file_path, safe='')}"
         params = {"ref": ref}
         return self.get(endpoint, params=params, use_cache=use_cache)

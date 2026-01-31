@@ -47,6 +47,7 @@ docs/
 
 # Data directories (should be mounted as volumes)
 chroma_db/
+lancedb/
 handbook_vectors/
 handbook_repo/
 :memory:/

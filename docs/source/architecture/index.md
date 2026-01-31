@@ -46,8 +46,8 @@ flowchart TB
 
 ## Data Flow Summary
 
-1. **Ingestion**: GitLab → Chunker → Embedder → ChromaDB → GCS backup
-2. **Query**: AI Assistant → MCP Server → ChromaDB search → Results
+1. **Ingestion**: GitLab → Chunker → Embedder → LanceDB → GCS (native when using cloud)
+2. **Query**: AI Assistant → MCP Server → LanceDB search → Results
 
 ## Architecture Documents
 
@@ -59,7 +59,7 @@ flowchart TB
 
 | Layer | Technology |
 |-------|------------|
-| **Vector Database** | ChromaDB |
+| **Vector Database** | LanceDB |
 | **Embeddings** | sentence-transformers (all-MiniLM-L6-v2) |
 | **API Protocol** | Model Context Protocol (MCP) |
 | **Transport** | HTTP/SSE |

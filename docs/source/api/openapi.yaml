@@ -287,9 +287,9 @@ paths:
   /merge-batches:
     post:
       tags: [Ingestion]
-      summary: Merge batch ChromaDBs
+      summary: Merge batch LanceDB tables
       description: |
-        Consolidates all batch ChromaDB instances into the main collection.
+        Consolidates all batch LanceDB tables into the main store (gs://bucket/lancedb).
         Call this endpoint after all batch tasks have completed.
       operationId: mergeBatches
       security:
@@ -563,7 +563,7 @@ components:
           example: "0_100_abc123"
         gcs_prefix:
           type: string
-          example: "chroma_db_batch_handbook_documents_0_100_abc123"
+          example: "lancedb_batch_handbook_documents_0_100_abc123"
         files_processed:
           type: integer
         chunks_created:
@@ -610,7 +610,7 @@ components:
           example: 10
         final_gcs_prefix:
           type: string
-          example: "chroma_db_handbook_documents"
+          example: "gs://bucket/lancedb"
 
     JobStats:
       type: object

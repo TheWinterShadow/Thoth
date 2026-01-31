@@ -177,15 +177,24 @@ jobs:
       - name: Terraform Plan
         id: plan
         run: |
-          terraform plan -no-color -input=false -var-file=environments/dev.tfvars
+          terraform plan -no-color -input=false \
+            -var-file=environments/dev.tfvars \
+            -var="mcp_container_image=gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.MCP_IMAGE_NAME }}:${{ github.sha }}" \
+            -var="ingestion_container_image=gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.INGESTION_IMAGE_NAME }}:${{ github.sha }}"
           echo "## Terraform Plan" >> $GITHUB_STEP_SUMMARY
           echo "Plan URL: https://app.terraform.io/app/${{ env.TF_CLOUD_ORGANIZATION }}/${{ env.TF_WORKSPACE }}/runs" >> $GITHUB_STEP_SUMMARY
+          echo "MCP Image: gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.MCP_IMAGE_NAME }}:${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "Ingestion Image: gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.INGESTION_IMAGE_NAME }}:${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
         working-directory: ${{ env.TF_WORKING_DIR }}
 
       - name: Terraform Apply
         id: apply
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-        run: terraform apply -auto-approve -var-file=environments/dev.tfvars
+        run: |
+          terraform apply -auto-approve \
+            -var-file=environments/dev.tfvars \
+            -var="mcp_container_image=gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.MCP_IMAGE_NAME }}:${{ github.sha }}" \
+            -var="ingestion_container_image=gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.INGESTION_IMAGE_NAME }}:${{ github.sha }}"
         working-directory: ${{ env.TF_WORKING_DIR }}
 
       - name: Get Terraform Outputs
@@ -204,19 +213,17 @@ jobs:
           echo "- Ingestion Worker URL: ${INGESTION_URL}" >> $GITHUB_STEP_SUMMARY
         working-directory: ${{ env.TF_WORKING_DIR }}
 
-  # Update Cloud Run images after Terraform deployment
-  # Note: Terraform manages all Cloud Run configuration (env vars, secrets, IAM).
-  # This job ONLY updates the container image, preserving Terraform-managed settings.
-  update_cloud_run_images:
-    name: "Update Cloud Run Images"
+  # Verify Cloud Run deployments after Terraform
+  # Note: Terraform now manages container images via variables.
+  # This job only verifies the deployments succeeded.
+  verify_deployments:
+    name: "Verify Deployments"
     runs-on: ubuntu-latest
     needs: [build_mcp_image, build_ingestion_image, terraform]
-    # Run if upstream succeeded/skipped AND (manual dispatch not skipped OR workflow_run CI succeeded)
+    # Run if terraform succeeded
     if: |
       always() &&
-      (needs.terraform.result == 'success' || needs.terraform.result == 'skipped') &&
-      (needs.build_mcp_image.result == 'success' || needs.build_mcp_image.result == 'skipped') &&
-      (needs.build_ingestion_image.result == 'success' || needs.build_ingestion_image.result == 'skipped') &&
+      needs.terraform.result == 'success' &&
       (
         (github.event_name == 'workflow_dispatch' && github.event.inputs.skip_cloud_run != 'true') ||
         (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
@@ -236,21 +243,6 @@ jobs:
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
-
-      # Only update the image - preserves all Terraform-managed configuration
-      - name: Update MCP Server Image
-        id: update_mcp
-        run: |
-          gcloud run services update ${{ env.MCP_SERVICE_NAME }} \
-            --image gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.MCP_IMAGE_NAME }}:${{ github.sha }} \
-            --region ${{ env.GCP_REGION }}
-
-      - name: Update Ingestion Worker Image
-        id: update_ingestion
-        run: |
-          gcloud run services update ${{ env.INGESTION_SERVICE_NAME }} \
-            --image gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.INGESTION_IMAGE_NAME }}:${{ github.sha }} \
-            --region ${{ env.GCP_REGION }}
 
       - name: Get Service URLs
         id: urls

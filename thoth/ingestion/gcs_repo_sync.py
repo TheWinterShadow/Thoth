@@ -5,6 +5,7 @@ This module handles syncing the GitLab handbook between GCS and local storage:
 2. Sync from GCS to local /tmp on Cloud Run startup
 """
 
+import logging
 from pathlib import Path
 import shutil
 import tempfile
@@ -27,6 +28,7 @@ class GCSRepoSync:
         repo_url: str,
         gcs_prefix: str = "handbook",
         local_path: Path | None = None,
+        logger_instance: logging.Logger | logging.LoggerAdapter | None = None,
     ):
         """Initialize GCS repository sync.
 
@@ -35,6 +37,7 @@ class GCSRepoSync:
             repo_url: Git repository URL
             gcs_prefix: Prefix/folder in GCS bucket for repository files
             local_path: Local path to sync to (defaults to /tmp/handbook)
+            logger_instance: Optional logger instance to use.
         """
         self.bucket_name = bucket_name
         self.repo_url = repo_url
@@ -42,6 +45,7 @@ class GCSRepoSync:
         self.local_path = local_path or Path("/tmp/handbook")  # nosec B108 - Cloud Run requires /tmp
         self.storage_client = storage.Client()
         self.bucket = self.storage_client.bucket(bucket_name)
+        self.logger = logger_instance or logger
 
     def clone_to_gcs(self, force: bool = False) -> dict[str, Any]:
         """Clone repository and upload to GCS.
@@ -55,13 +59,13 @@ class GCSRepoSync:
         Returns:
             Dictionary with stats about the clone operation
         """
-        logger.info("Cloning repository to GCS: %s", self.repo_url)
+        self.logger.info("Cloning repository to GCS: %s", self.repo_url)
 
         # Check if already exists in GCS
         if not force:
             blobs = list(self.bucket.list_blobs(prefix=f"{self.gcs_prefix}/", max_results=1))
             if blobs:
-                logger.info("Repository already exists in GCS. Use force=True to re-clone.")
+                self.logger.info("Repository already exists in GCS. Use force=True to re-clone.")
                 return {
                     "status": "exists",
                     "message": "Repository already in GCS",
@@ -70,11 +74,11 @@ class GCSRepoSync:
         # Clone to temporary directory
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir) / "repo"
-            logger.info("Cloning to temporary directory: %s", tmp_path)
+            self.logger.info("Cloning to temporary directory: %s", tmp_path)
             Repo.clone_from(self.repo_url, str(tmp_path))
 
             # Upload all files to GCS
-            logger.info(
+            self.logger.info(
                 "Uploading repository to GCS bucket: %s/%s",
                 self.bucket_name,
                 self.gcs_prefix,
@@ -91,9 +95,9 @@ class GCSRepoSync:
                     uploaded += 1
 
                     if uploaded % 100 == 0:
-                        logger.info("Uploaded %d files...", uploaded)
+                        self.logger.info("Uploaded %d files...", uploaded)
 
-            logger.info("Successfully uploaded %d files to GCS", uploaded)
+            self.logger.info("Successfully uploaded %d files to GCS", uploaded)
 
             return {
                 "status": "success",
@@ -114,7 +118,7 @@ class GCSRepoSync:
         """
         # Check if already synced (has markdown files, not just directory exists)
         if not force and self.is_synced():
-            logger.info("Local repository already synced at %s", self.local_path)
+            self.logger.info("Local repository already synced at %s", self.local_path)
             file_count = sum(1 for _ in self.local_path.rglob("*.md"))
             return {
                 "status": "exists",
@@ -124,12 +128,12 @@ class GCSRepoSync:
 
         # Clean up if forcing re-download
         if self.local_path.exists() and force:
-            logger.info("Removing existing local repository: %s", self.local_path)
+            self.logger.info("Removing existing local repository: %s", self.local_path)
             shutil.rmtree(self.local_path)
 
         # Create local directory
         self.local_path.mkdir(parents=True, exist_ok=True)
-        logger.info("Syncing repository from GCS to %s", self.local_path)
+        self.logger.info("Syncing repository from GCS to %s", self.local_path)
 
         # Download all blobs
         downloaded = 0
@@ -153,14 +157,14 @@ class GCSRepoSync:
             downloaded += 1
 
             if downloaded % 100 == 0:
-                logger.info("Downloaded %d files...", downloaded)
+                self.logger.info("Downloaded %d files...", downloaded)
 
-        logger.info("Successfully synced %d files from GCS to local", downloaded)
+        self.logger.info("Successfully synced %d files from GCS to local", downloaded)
 
         # Create completion marker to signal sync is done
         completion_marker = self.local_path / ".sync_complete"
         completion_marker.touch()
-        logger.info("Created sync completion marker at %s", completion_marker)
+        self.logger.info("Created sync completion marker at %s", completion_marker)
 
         return {
             "status": "success",

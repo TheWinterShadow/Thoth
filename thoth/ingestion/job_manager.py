@@ -70,7 +70,7 @@ class Job:
     """Represents an ingestion job.
 
     Attributes:
-        job_id: Unique job identifier (UUID)
+        job_id: Unique job identifier (UUID or parent_id_NNNN for sub-jobs)
         status: Current job status
         source: Source identifier (e.g., 'handbook', 'dnd')
         collection_name: Target ChromaDB collection
@@ -78,6 +78,10 @@ class Job:
         completed_at: Job completion timestamp (if finished)
         stats: Job statistics
         error: Error message (if failed)
+        parent_job_id: Parent job ID (for sub-jobs/batches)
+        batch_index: Batch number within parent job (for sub-jobs)
+        total_batches: Total number of batches (for parent jobs)
+        completed_batches: Number of completed batches (for parent jobs)
     """
 
     job_id: str
@@ -88,10 +92,14 @@ class Job:
     completed_at: datetime | None = None
     stats: JobStats = field(default_factory=JobStats)
     error: str | None = None
+    parent_job_id: str | None = None
+    batch_index: int | None = None
+    total_batches: int | None = None
+    completed_batches: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         """Convert job to Firestore-compatible dictionary."""
-        return {
+        data: dict[str, Any] = {
             "job_id": self.job_id,
             "status": self.status.value,
             "source": self.source,
@@ -101,6 +109,16 @@ class Job:
             "stats": self.stats.to_dict(),
             "error": self.error,
         }
+        # Only include batch fields if relevant
+        if self.parent_job_id is not None:
+            data["parent_job_id"] = self.parent_job_id
+        if self.batch_index is not None:
+            data["batch_index"] = self.batch_index
+        if self.total_batches is not None:
+            data["total_batches"] = self.total_batches
+        if self.completed_batches > 0 or self.total_batches is not None:
+            data["completed_batches"] = self.completed_batches
+        return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Job":
@@ -114,12 +132,21 @@ class Job:
             completed_at=(datetime.fromisoformat(data["completed_at"]) if data.get("completed_at") else None),
             stats=JobStats.from_dict(data.get("stats", {})),
             error=data.get("error"),
+            parent_job_id=data.get("parent_job_id"),
+            batch_index=data.get("batch_index"),
+            total_batches=data.get("total_batches"),
+            completed_batches=data.get("completed_batches", 0),
         )
 
     @property
     def is_finished(self) -> bool:
         """Check if job has finished (completed or failed)."""
         return self.status in (JobStatus.COMPLETED, JobStatus.FAILED)
+
+    @property
+    def is_sub_job(self) -> bool:
+        """Check if this is a sub-job (batch) of a parent job."""
+        return self.parent_job_id is not None
 
     @property
     def duration_seconds(self) -> float | None:
@@ -178,12 +205,18 @@ class JobManager:
         self._ensure_initialized()
         return self._collection
 
-    def create_job(self, source: str, collection_name: str) -> Job:
+    def create_job(
+        self,
+        source: str,
+        collection_name: str,
+        total_batches: int | None = None,
+    ) -> Job:
         """Create a new job and persist to Firestore.
 
         Args:
             source: Source identifier (e.g., 'handbook', 'dnd')
             collection_name: Target ChromaDB collection
+            total_batches: Number of batches (for parent jobs with sub-jobs)
 
         Returns:
             Created Job instance
@@ -194,11 +227,53 @@ class JobManager:
             source=source,
             collection_name=collection_name,
             started_at=datetime.now(timezone.utc),
+            total_batches=total_batches,
         )
 
         self.collection.document(job.job_id).set(job.to_dict())
         logger.info("Created job %s for source '%s'", job.job_id, source)
         return job
+
+    def create_sub_job(
+        self,
+        parent_job: Job,
+        batch_index: int,
+        total_files: int = 0,
+    ) -> Job:
+        """Create a sub-job (batch) for a parent job.
+
+        Sub-job IDs are formatted as {parent_job_id}_{batch_index:04d}
+        for easy identification and sorting.
+
+        Args:
+            parent_job: Parent job instance
+            batch_index: Batch number (0-based)
+            total_files: Number of files in this batch
+
+        Returns:
+            Created sub-job instance
+        """
+        sub_job_id = f"{parent_job.job_id}_{batch_index:04d}"
+
+        sub_job = Job(
+            job_id=sub_job_id,
+            status=JobStatus.PENDING,
+            source=parent_job.source,
+            collection_name=parent_job.collection_name,
+            started_at=datetime.now(timezone.utc),
+            parent_job_id=parent_job.job_id,
+            batch_index=batch_index,
+            stats=JobStats(total_files=total_files),
+        )
+
+        self.collection.document(sub_job.job_id).set(sub_job.to_dict())
+        logger.info(
+            "Created sub-job %s (batch %d of %d)",
+            sub_job.job_id,
+            batch_index + 1,
+            parent_job.total_batches or "?",
+        )
+        return sub_job
 
     def get_job(self, job_id: str) -> Job | None:
         """Retrieve a job by ID.
@@ -343,3 +418,170 @@ class JobManager:
             logger.info("Cleaned up %d old jobs (older than %d days)", deleted, days)
 
         return deleted
+
+    def get_sub_jobs(self, parent_job_id: str) -> list[Job]:
+        """Get all sub-jobs for a parent job.
+
+        Args:
+            parent_job_id: Parent job identifier
+
+        Returns:
+            List of sub-jobs, ordered by batch_index
+        """
+        query = self.collection.where("parent_job_id", "==", parent_job_id)
+        query = query.order_by("batch_index")
+
+        return [Job.from_dict(doc.to_dict()) for doc in query.stream()]
+
+    def get_job_with_sub_jobs(self, job_id: str) -> dict[str, Any] | None:
+        """Get a job with its sub-jobs and aggregated statistics.
+
+        Args:
+            job_id: Job identifier
+
+        Returns:
+            Dictionary with job details and sub-jobs, or None if not found
+        """
+        job = self.get_job(job_id)
+        if job is None:
+            return None
+
+        result = job.to_dict()
+
+        # If this is a parent job with batches, include sub-job info
+        if job.total_batches is not None and job.total_batches > 0:
+            sub_jobs = self.get_sub_jobs(job_id)
+
+            # Aggregate statistics from sub-jobs
+            total_processed = 0
+            total_failed = 0
+            total_chunks = 0
+            completed_count = 0
+            failed_count = 0
+            running_count = 0
+            pending_count = 0
+
+            sub_job_summaries = []
+            for sub_job in sub_jobs:
+                total_processed += sub_job.stats.processed_files
+                total_failed += sub_job.stats.failed_files
+                total_chunks += sub_job.stats.total_chunks
+
+                if sub_job.status == JobStatus.COMPLETED:
+                    completed_count += 1
+                elif sub_job.status == JobStatus.FAILED:
+                    failed_count += 1
+                elif sub_job.status == JobStatus.RUNNING:
+                    running_count += 1
+                else:
+                    pending_count += 1
+
+                sub_job_summaries.append(
+                    {
+                        "job_id": sub_job.job_id,
+                        "batch_index": sub_job.batch_index,
+                        "status": sub_job.status.value,
+                        "stats": sub_job.stats.to_dict(),
+                        "error": sub_job.error,
+                    }
+                )
+
+            # Update aggregated stats in result
+            result["stats"]["processed_files"] = total_processed
+            result["stats"]["failed_files"] = total_failed
+            result["stats"]["total_chunks"] = total_chunks
+            result["stats"]["total_documents"] = total_chunks
+
+            result["batch_summary"] = {
+                "total": job.total_batches,
+                "completed": completed_count,
+                "failed": failed_count,
+                "running": running_count,
+                "pending": pending_count,
+            }
+            result["sub_jobs"] = sub_job_summaries
+
+        return result
+
+    def mark_sub_job_completed(
+        self,
+        sub_job: Job,
+        stats: JobStats | None = None,
+    ) -> Job | None:
+        """Mark a sub-job as completed and update parent job progress.
+
+        Args:
+            sub_job: Sub-job to mark as completed
+            stats: Optional final statistics for the sub-job
+
+        Returns:
+            Updated parent job, or None if no parent
+        """
+        # Mark sub-job as completed
+        self.mark_completed(sub_job, stats)
+
+        # Update parent job if exists
+        if sub_job.parent_job_id:
+            parent_job = self.get_job(sub_job.parent_job_id)
+            if parent_job:
+                parent_job.completed_batches += 1
+
+                # Aggregate stats from this sub-job into parent
+                if stats:
+                    parent_job.stats.processed_files += stats.processed_files
+                    parent_job.stats.failed_files += stats.failed_files
+                    parent_job.stats.total_chunks += stats.total_chunks
+                    parent_job.stats.total_documents += stats.total_documents
+
+                # Check if all batches are done
+                if parent_job.total_batches and parent_job.completed_batches >= parent_job.total_batches:
+                    parent_job.status = JobStatus.COMPLETED
+                    parent_job.completed_at = datetime.now(timezone.utc)
+                    logger.info(
+                        "Parent job %s completed: all %d batches done",
+                        parent_job.job_id,
+                        parent_job.total_batches,
+                    )
+
+                self.update_job(parent_job)
+                return parent_job
+
+        return None
+
+    def mark_sub_job_failed(self, sub_job: Job, error: str) -> Job | None:
+        """Mark a sub-job as failed and update parent job.
+
+        Args:
+            sub_job: Sub-job to mark as failed
+            error: Error message
+
+        Returns:
+            Updated parent job, or None if no parent
+        """
+        # Mark sub-job as failed
+        self.mark_failed(sub_job, error)
+
+        # Update parent job if exists
+        if sub_job.parent_job_id:
+            parent_job = self.get_job(sub_job.parent_job_id)
+            if parent_job:
+                # Increment completed count (failed still counts as "done")
+                parent_job.completed_batches += 1
+                parent_job.stats.failed_files += 1  # Track batch as failed
+
+                # Check if all batches are done
+                if parent_job.total_batches and parent_job.completed_batches >= parent_job.total_batches:
+                    # If any batch failed, mark parent as failed too
+                    parent_job.status = JobStatus.FAILED
+                    parent_job.completed_at = datetime.now(timezone.utc)
+                    parent_job.error = f"One or more batches failed. Last error: {error}"
+                    logger.error(
+                        "Parent job %s failed: batch %s failed",
+                        parent_job.job_id,
+                        sub_job.job_id,
+                    )
+
+                self.update_job(parent_job)
+                return parent_job
+
+        return None

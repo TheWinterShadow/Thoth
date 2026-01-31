@@ -52,20 +52,17 @@ from thoth.shared.vector_store import VectorStore
 configure_root_logger()
 logger = setup_logger(__name__)
 
-# GCS prefix pattern for collection databases
-COLLECTION_GCS_PREFIX_PATTERN = "chroma_db_{collection_name}"
-
 
 class ThothMCPServer:
     """Main Thoth MCP Server implementation.
 
     This server provides semantic search capabilities over multiple document
-    collections through the Model Context Protocol (MCP). It uses ChromaDB
+    collections through the Model Context Protocol (MCP). It uses LanceDB
     vector stores for efficient similarity search and implements a manual
     LRU cache for query performance optimization.
 
     Architecture:
-        - Vector Stores: Multiple ChromaDB collections (handbook, dnd, personal)
+        - Vector Stores: Multiple LanceDB tables (handbook, dnd, personal)
         - Embedding Model: Configurable (default: all-MiniLM-L6-v2)
         - Cache Strategy: Manual LRU with 100 entry limit
         - Transport: stdio (standard input/output)
@@ -73,7 +70,7 @@ class ThothMCPServer:
     Attributes:
         name (str): Server identifier name
         version (str): Server version string
-        base_db_path (str): Base path for ChromaDB vector databases
+        base_db_path (str): Base path for LanceDB (local) or GCS bucket (Cloud Run)
         server (Server): MCP Server instance
         source_registry (SourceRegistry): Registry of available data sources
         vector_stores (dict[str, VectorStore]): Vector stores by source name
@@ -167,28 +164,27 @@ class ThothMCPServer:
     def _ensure_vector_stores_loaded(self) -> None:
         """Ensure vector stores are loaded (lazy loading on first access).
 
-        This method enables fast startup by deferring ChromaDB loading until
-        the first search/query operation. Subsequent calls are no-ops.
-
-        Thread-safe: Uses a simple flag check. Multiple simultaneous calls
-        will result in redundant loading, but this is acceptable since it
-        only happens once per server lifetime during the first query.
+        Defers LanceDB connection and embedder loading until the first
+        search/query operation so startup stays fast. Subsequent calls are
+        no-ops. Uses a simple flag check; multiple simultaneous calls may
+        trigger redundant loading once, which is acceptable.
         """
         if self._vector_stores_loaded:
             return
 
         logger.info("Lazy loading vector stores on first access...")
+        # Load LanceDB tables and embedder; sets vector_stores and vector_store.
         self._init_vector_stores()
         self._vector_stores_loaded = True
         logger.info("Vector stores loaded: %d collections ready", len(self.vector_stores))
 
-    def _init_vector_stores(self) -> None:  # noqa: PLR0912
+    def _init_vector_stores(self) -> None:
         """Initialize vector stores for all configured data sources.
 
-        Attempts to load ChromaDB vector databases for each source (handbook,
-        dnd, personal). In Cloud Run, restores from GCS if configured.
+        Loads LanceDB tables for each source (handbook, dnd, personal).
+        In Cloud Run, uses GCS URI directly; no restore step needed.
 
-        Each source has its own collection with metadata including:
+        Each source has its own table with metadata including:
             - section: The document section name
             - source: Original source file path
             - chunk_index: Position of chunk in original document
@@ -205,12 +201,10 @@ class ThothMCPServer:
         """
         gcs_bucket = os.getenv("GCS_BUCKET_NAME")
         gcs_project = os.getenv("GCP_PROJECT_ID")
-        skip_restore = os.getenv("SKIP_VECTOR_RESTORE", "false").lower() == "true"
 
         logger.info(
-            "Starting vector store initialization (GCS: %s, Skip restore: %s)",
+            "Starting vector store initialization (GCS: %s)",
             bool(gcs_bucket and gcs_project),
-            skip_restore,
         )
 
         start_time = time.time()
@@ -219,22 +213,20 @@ class ThothMCPServer:
             try:
                 source_name = source_config.name
                 collection_name = source_config.collection_name
-                gcs_prefix = COLLECTION_GCS_PREFIX_PATTERN.format(collection_name=collection_name)
-                db_path = Path(self.base_db_path) / collection_name
+                db_path = Path(self.base_db_path)
 
                 logger.info(
-                    "Initializing source '%s' (collection: %s)",
+                    "Initializing source '%s' (table: %s)",
                     source_name,
                     collection_name,
                 )
                 source_start = time.time()
 
                 if gcs_bucket and gcs_project:
-                    # Cloud Run: Initialize VectorStore with GCS sync and restore
+                    # Cloud Run: LanceDB uses GCS URI directly; no restore needed
                     logger.info(
-                        "Initializing '%s' collection from GCS prefix '%s'",
+                        "Initializing '%s' from GCS",
                         source_name,
-                        gcs_prefix,
                     )
                     vector_store = VectorStore(
                         persist_directory=str(db_path),
@@ -242,56 +234,23 @@ class ThothMCPServer:
                         gcs_bucket_name=gcs_bucket,
                         gcs_project_id=gcs_project,
                     )
-
-                    # Optionally skip GCS restoration for faster startup
-                    if not skip_restore:
-                        # Restore from GCS
-                        logger.info("Starting GCS restoration for '%s'...", source_name)
-                        restored = vector_store.restore_from_gcs(gcs_prefix=gcs_prefix)
-                        if restored > 0:
-                            doc_count = vector_store.get_document_count()
-                            logger.info(
-                                "Restored '%s' collection: %d files, %d documents (%.2fs)",
-                                source_name,
-                                restored,
-                                doc_count,
-                                time.time() - source_start,
-                            )
-                            self.vector_stores[source_name] = vector_store
-                        else:
-                            logger.warning(
-                                "No files restored for '%s' from GCS (%.2fs)",
-                                source_name,
-                                time.time() - source_start,
-                            )
-                    else:
-                        logger.info(
-                            "Skipping GCS restoration for '%s' (SKIP_VECTOR_RESTORE=true)",
-                            source_name,
-                        )
-                        # Check if local DB exists from previous run
-                        if db_path.exists():
-                            doc_count = vector_store.get_document_count()
-                            logger.info(
-                                "Using existing local DB for '%s': %d documents",
-                                source_name,
-                                doc_count,
-                            )
-                            self.vector_stores[source_name] = vector_store
-                        else:
-                            logger.info(
-                                "No local DB found for '%s', collection unavailable",
-                                source_name,
-                            )
+                    doc_count = vector_store.get_document_count()
+                    logger.info(
+                        "Loaded '%s' table: %d documents (%.2fs)",
+                        source_name,
+                        doc_count,
+                        time.time() - source_start,
+                    )
+                    self.vector_stores[source_name] = vector_store
                 elif db_path.exists():
-                    # Local: use existing database
+                    # Local: one LanceDB directory, multiple tables
                     vector_store = VectorStore(
                         persist_directory=str(db_path),
                         collection_name=collection_name,
                     )
                     doc_count = vector_store.get_document_count()
                     logger.info(
-                        "Loaded '%s' collection from %s: %d documents (%.2fs)",
+                        "Loaded '%s' table from %s: %d documents (%.2fs)",
                         source_name,
                         db_path,
                         doc_count,
@@ -300,9 +259,9 @@ class ThothMCPServer:
                     self.vector_stores[source_name] = vector_store
                 else:
                     logger.info(
-                        "Collection '%s' not found at %s (will be skipped)",
-                        source_name,
+                        "Database path '%s' not found; '%s' unavailable",
                         db_path,
+                        source_name,
                     )
 
             except (OSError, ValueError, RuntimeError):
@@ -1114,6 +1073,8 @@ class ThothMCPServer:
             ...
         """
         try:
+            if self.vector_store is None:
+                return "Error: Handbook database not available. Please ensure the handbook was ingested."
             # Lazy load vector stores on first access
             self._ensure_vector_stores_loaded()
 
@@ -1396,12 +1357,13 @@ class ThothMCPServer:
         sse = SseServerTransport("/messages")
 
         async def handle_sse(scope: Scope, receive: Receive, send: Send) -> None:
-            """Handle SSE connection using raw ASGI interface."""
+            """Handle GET /sse: establish SSE and run MCP server over read/write streams."""
             async with sse.connect_sse(scope, receive, send) as streams:
+                # Run MCP protocol over the bidirectional streams until client disconnects.
                 await self.server.run(streams[0], streams[1], self.server.create_initialization_options())
 
         async def handle_messages(scope: Scope, receive: Receive, send: Send) -> None:
-            """Handle POST messages using raw ASGI interface."""
+            """Handle POST /messages: process incoming MCP JSON-RPC messages."""
             await sse.handle_post_message(scope, receive, send)
 
         return Starlette(
@@ -1414,14 +1376,22 @@ class ThothMCPServer:
 
 
 async def invoker() -> None:
-    """Main entry point for the MCP server."""
+    """Create ThothMCPServer and run the MCP protocol (stdio or SSE).
+
+    Used as the async entry point; run_server() wraps this with asyncio.run().
+    """
     server = ThothMCPServer()
     await server.run()
 
 
 def run_server() -> None:
-    """Synchronous entry point for running the server."""
+    """Synchronous entry point: run the MCP server until interrupted.
+
+    Runs the async invoker in the default event loop. Exits on KeyboardInterrupt
+    or propagates other exceptions.
+    """
     try:
+        # Run the async MCP server in the default event loop.
         asyncio.run(invoker())
     except KeyboardInterrupt:
         logger.info("Server shutdown requested")

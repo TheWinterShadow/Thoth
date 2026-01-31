@@ -1,0 +1,12 @@
+# Force LF line endings in the repo (avoids "LF will be replaced by CRLF" on Windows/WSL).
+* text=auto eol=lf
+
+# Explicitly mark binary files so Git does not alter them.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary

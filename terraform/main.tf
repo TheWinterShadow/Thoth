@@ -48,7 +48,8 @@ module "mcp" {
   project_id                = var.project_id
   region                    = var.region
   log_level                 = var.log_level
-  
+  container_image           = var.mcp_container_image
+
   # Dependencies from shared module
   service_account_email     = module.shared.service_account_email
   storage_bucket_name       = module.shared.storage_bucket_name
@@ -66,6 +67,7 @@ module "ingestion" {
   project_id            = var.project_id
   region                = var.region
   environment           = var.environment
+  container_image       = var.ingestion_container_image
 
   # Dependencies from shared module
   service_account_email           = module.shared.service_account_email

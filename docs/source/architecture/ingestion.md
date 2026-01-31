@@ -9,7 +9,7 @@ The ingestion pipeline is responsible for:
 2. Parsing multiple file formats (Markdown, PDF, text, Word)
 3. Chunking documents into semantic segments
 4. Generating embeddings using sentence-transformers
-5. Storing vectors in ChromaDB collections for semantic search
+5. Storing vectors in LanceDB tables for semantic search
 6. Tracking job progress via Firestore
 
 ## System Architecture
@@ -44,7 +44,7 @@ flowchart TB
     end
 
     subgraph Storage["Vector Storage"]
-        VS[(ChromaDB Collections)]
+        VS[(LanceDB Tables)]
     end
 
     GL -->|clone| GCS
@@ -84,10 +84,10 @@ sequenceDiagram
     Parsers-->>Worker: Parsed documents
     Worker->>Worker: Chunk documents
     Worker->>Worker: Generate embeddings
-    Worker->>ChromaDB: Upsert vectors
+    Worker->>LanceDB: Upsert vectors
 
     Worker->>Jobs: Update job (completed)
-    Worker->>GCS: Sync ChromaDB
+    Worker->>GCS: Native storage (LanceDB on GCS)
 
     Client->>Worker: GET /jobs/{job_id}
     Worker->>Jobs: Get job status
@@ -160,7 +160,7 @@ stateDiagram-v2
 | `job_id` | string | UUID identifier |
 | `status` | enum | pending, running, completed, failed |
 | `source` | string | Source name (handbook, dnd, personal) |
-| `collection_name` | string | Target ChromaDB collection |
+| `collection_name` | string | Target LanceDB table name |
 | `started_at` | timestamp | Job start time |
 | `completed_at` | timestamp | Job completion time |
 | `stats` | object | Processing statistics |
@@ -193,7 +193,7 @@ Cloud Run service endpoints:
 | `/clone-handbook` | POST | Clone GitLab handbook to GCS |
 | `/ingest` | POST | Start ingestion job (returns job_id) |
 | `/ingest-batch` | POST | Process specific file batch |
-| `/merge-batches` | POST | Consolidate batch ChromaDBs |
+| `/merge-batches` | POST | Consolidate batch LanceDB tables |
 | `/jobs` | GET | List jobs (with filtering) |
 | `/jobs/{job_id}` | GET | Get job status |
 

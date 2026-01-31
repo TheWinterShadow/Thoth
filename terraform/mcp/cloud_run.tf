@@ -22,7 +22,7 @@ resource "google_cloud_run_v2_service" "thoth_mcp" {
     }
 
     containers {
-      image = "gcr.io/${var.project_id}/thoth-mcp:latest"
+      image = var.container_image
 
       ports {
         name           = "http1"
