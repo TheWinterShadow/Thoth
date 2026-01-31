@@ -1042,7 +1042,7 @@ class ThothMCPServer:
             # Check if any documents were found
             if not all_docs:
                 sources_str = ", ".join(sources_to_search)
-                return f"No content found for section: '{section_name}' in sources: {sources_str}"
+                return f"ERROR: No content found for section: '{section_name}' in sources: {sources_str}"
 
             # Limit total results
             all_docs = all_docs[:limit]
