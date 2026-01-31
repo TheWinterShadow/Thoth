@@ -1984,6 +1984,6 @@ class TestMCPHandlerIntegration(unittest.IsolatedAsyncioTestCase):
         mock_path.return_value = mock_path_instance
 
         server = ThothMCPServer(base_db_path="/fake/path")
-        # Vector store object is created, but vector_stores dict may be empty
+        # With lazy loading, vector_store is None until first use
         # Check that initialization completed without error
-        self.assertIsNotNone(server.vector_store)
+        self.assertIsNone(server.vector_store)

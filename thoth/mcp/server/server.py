@@ -44,7 +44,7 @@ from starlette.applications import Starlette
 from starlette.routing import Route
 from starlette.types import Receive, Scope, Send
 
-from thoth.ingestion.sources.config import SourceRegistry
+from thoth.shared.sources.config import SourceRegistry
 from thoth.shared.utils.logger import setup_logger
 from thoth.shared.vector_store import VectorStore
 
@@ -150,15 +150,33 @@ class ThothMCPServer:
         # Legacy: maintain backward compatibility with single vector_store attribute
         self.vector_store: VectorStore | None = None
 
-        # Initialize vector stores for all configured sources
-        self._init_vector_stores()
+        # Lazy loading flag to avoid blocking startup
+        self._vector_stores_loaded = False
 
-        # Setup MCP handlers
+        # Setup MCP handlers first
         self._setup_handlers()
 
-        logger.info("Initialized %s v%s with %d collections", name, version, len(self.vector_stores))
+        logger.info("Initialized %s v%s (vector stores will be loaded on first use)", name, version)
 
-    def _init_vector_stores(self) -> None:
+    def _ensure_vector_stores_loaded(self) -> None:
+        """Ensure vector stores are loaded (lazy loading on first access).
+
+        This method enables fast startup by deferring ChromaDB loading until
+        the first search/query operation. Subsequent calls are no-ops.
+
+        Thread-safe: Uses a simple flag check. Multiple simultaneous calls
+        will result in redundant loading, but this is acceptable since it
+        only happens once per server lifetime during the first query.
+        """
+        if self._vector_stores_loaded:
+            return
+
+        logger.info("Lazy loading vector stores on first access...")
+        self._init_vector_stores()
+        self._vector_stores_loaded = True
+        logger.info("Vector stores loaded: %d collections ready", len(self.vector_stores))
+
+    def _init_vector_stores(self) -> None:  # noqa: PLR0912
         """Initialize vector stores for all configured data sources.
 
         Attempts to load ChromaDB vector databases for each source (handbook,
@@ -181,6 +199,15 @@ class ThothMCPServer:
         """
         gcs_bucket = os.getenv("GCS_BUCKET_NAME")
         gcs_project = os.getenv("GCP_PROJECT_ID")
+        skip_restore = os.getenv("SKIP_VECTOR_RESTORE", "false").lower() == "true"
+
+        logger.info(
+            "Starting vector store initialization (GCS: %s, Skip restore: %s)",
+            bool(gcs_bucket and gcs_project),
+            skip_restore,
+        )
+
+        start_time = time.time()
 
         for source_config in self.source_registry.list_configs():
             try:
@@ -188,6 +215,9 @@ class ThothMCPServer:
                 collection_name = source_config.collection_name
                 gcs_prefix = COLLECTION_GCS_PREFIX_PATTERN.format(collection_name=collection_name)
                 db_path = Path(self.base_db_path) / collection_name
+
+                logger.info("Initializing source '%s' (collection: %s)", source_name, collection_name)
+                source_start = time.time()
 
                 if gcs_bucket and gcs_project:
                     # Cloud Run: Initialize VectorStore with GCS sync and restore
@@ -198,19 +228,35 @@ class ThothMCPServer:
                         gcs_bucket_name=gcs_bucket,
                         gcs_project_id=gcs_project,
                     )
-                    # Restore from GCS
-                    restored = vector_store.restore_from_gcs(gcs_prefix=gcs_prefix)
-                    if restored > 0:
-                        doc_count = vector_store.get_document_count()
-                        logger.info(
-                            "Restored '%s' collection: %d files, %d documents",
-                            source_name,
-                            restored,
-                            doc_count,
-                        )
-                        self.vector_stores[source_name] = vector_store
+
+                    # Optionally skip GCS restoration for faster startup
+                    if not skip_restore:
+                        # Restore from GCS
+                        logger.info("Starting GCS restoration for '%s'...", source_name)
+                        restored = vector_store.restore_from_gcs(gcs_prefix=gcs_prefix)
+                        if restored > 0:
+                            doc_count = vector_store.get_document_count()
+                            logger.info(
+                                "Restored '%s' collection: %d files, %d documents (%.2fs)",
+                                source_name,
+                                restored,
+                                doc_count,
+                                time.time() - source_start,
+                            )
+                            self.vector_stores[source_name] = vector_store
+                        else:
+                            logger.warning(
+                                "No files restored for '%s' from GCS (%.2fs)", source_name, time.time() - source_start
+                            )
                     else:
-                        logger.warning("No files restored for '%s' from GCS", source_name)
+                        logger.info("Skipping GCS restoration for '%s' (SKIP_VECTOR_RESTORE=true)", source_name)
+                        # Check if local DB exists from previous run
+                        if db_path.exists():
+                            doc_count = vector_store.get_document_count()
+                            logger.info("Using existing local DB for '%s': %d documents", source_name, doc_count)
+                            self.vector_stores[source_name] = vector_store
+                        else:
+                            logger.info("No local DB found for '%s', collection unavailable", source_name)
                 elif db_path.exists():
                     # Local: use existing database
                     vector_store = VectorStore(
@@ -219,10 +265,11 @@ class ThothMCPServer:
                     )
                     doc_count = vector_store.get_document_count()
                     logger.info(
-                        "Loaded '%s' collection from %s: %d documents",
+                        "Loaded '%s' collection from %s: %d documents (%.2fs)",
                         source_name,
                         db_path,
                         doc_count,
+                        time.time() - source_start,
                     )
                     self.vector_stores[source_name] = vector_store
                 else:
@@ -230,6 +277,12 @@ class ThothMCPServer:
 
             except (OSError, ValueError, RuntimeError):
                 logger.exception("Failed to initialize vector store for '%s'", source_name)
+
+        logger.info(
+            "Vector store initialization complete: %d collections loaded in %.2fs",
+            len(self.vector_stores),
+            time.time() - start_time,
+        )
 
         # Set legacy vector_store attribute to handbook for backward compatibility
         if "handbook" in self.vector_stores:
@@ -775,6 +828,7 @@ class ThothMCPServer:
         embeddings and returns formatted results with relevance scores and metadata.
 
         Search Process:
+            0. Lazy load vector stores if not already loaded (first call only)
             1. Validates n_results parameter (clamps to 1-20 range)
             2. Validates and filters requested sources
             3. Checks cache for existing results
@@ -830,6 +884,9 @@ class ThothMCPServer:
             ...
         """
         try:
+            # Lazy load vector stores on first access
+            self._ensure_vector_stores_loaded()
+
             # Validate and clamp n_results to acceptable range (1-20)
             n_results = max(1, min(n_results, 20))
 
@@ -921,6 +978,9 @@ class ThothMCPServer:
             ...
         """
         try:
+            # Lazy load vector stores on first access
+            self._ensure_vector_stores_loaded()
+
             # Validate and clamp limit to acceptable range
             limit = max(1, min(limit, 100))
 
@@ -1018,6 +1078,9 @@ class ThothMCPServer:
             ...
         """
         try:
+            # Lazy load vector stores on first access
+            self._ensure_vector_stores_loaded()
+
             # Validate and clamp max_depth
             max_depth = max(1, min(max_depth, 5))
 

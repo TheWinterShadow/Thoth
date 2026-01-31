@@ -23,8 +23,8 @@ import uvicorn
 
 from thoth.ingestion.job_manager import Job, JobManager, JobStats, JobStatus
 from thoth.ingestion.pipeline import IngestionPipeline, PipelineStats
-from thoth.ingestion.sources.config import SourceConfig, SourceRegistry
 from thoth.shared.health import HealthCheck
+from thoth.shared.sources.config import SourceConfig, SourceRegistry
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

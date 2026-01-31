@@ -11,6 +11,11 @@ resource "google_cloud_run_v2_service" "thoth_mcp" {
     service_account = var.service_account_email
     timeout         = "300s" # 5 minutes for queries (reduced from 3600s)
 
+    # Force new revision deployment with lazy loading
+    annotations = {
+      "lazy-loading-enabled" = "v2"
+    }
+
     scaling {
       min_instance_count = 0  # Scale to zero when idle
       max_instance_count = 10 # Scale up for query traffic
@@ -64,12 +69,12 @@ resource "google_cloud_run_v2_service" "thoth_mcp" {
         }
       }
 
-      # Startup probe
+      # Startup probe - allow more time for GCS restoration
       startup_probe {
-        initial_delay_seconds = 10
-        timeout_seconds       = 5
-        period_seconds        = 10
-        failure_threshold     = 6
+        initial_delay_seconds = 15
+        timeout_seconds       = 10
+        period_seconds        = 15
+        failure_threshold     = 12  # 15 + (15 * 12) = 195 seconds total
 
         http_get {
           path = "/health"

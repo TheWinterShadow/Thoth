@@ -105,7 +105,7 @@ class TestGitLabAPIClient(unittest.TestCase):
         cached = self.client._get_from_cache(cache_key)
         self.assertEqual(cached, test_data)
 
-        time.sleep(1.1)
+        time.sleep(2)
         expired = self.client._get_from_cache(cache_key)
         self.assertIsNone(expired)
 

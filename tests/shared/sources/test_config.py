@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from thoth.ingestion.sources.config import (
+from thoth.shared.sources.config import (
     DEFAULT_SOURCES,
     SourceConfig,
     SourceRegistry,

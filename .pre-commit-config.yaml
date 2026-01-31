@@ -35,16 +35,16 @@ repos:
   # Ruff - Fast Python linter and formatter (managed by hatch)
   - repo: local
     hooks:
-      - id: ruff-check
-        name: ruff-check
-        entry: hatch run lint:ruff check --fix
+      - id: ruff-format
+        name: ruff-format
+        entry: hatch run lint:ruff format
         language: system
         types:
           - python
         require_serial: true
-      - id: ruff-format
-        name: ruff-format
-        entry: hatch run lint:ruff format
+      - id: ruff-check
+        name: ruff-check
+        entry: hatch run lint:ruff check --fix
         language: system
         types:
           - python

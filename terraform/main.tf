@@ -65,6 +65,7 @@ module "ingestion" {
 
   project_id            = var.project_id
   region                = var.region
+  environment           = var.environment
 
   # Dependencies from shared module
   service_account_email           = module.shared.service_account_email

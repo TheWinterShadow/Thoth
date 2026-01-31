@@ -19,8 +19,8 @@ from thoth.ingestion.chunker import Chunk, DocumentChunker, MarkdownChunker
 from thoth.ingestion.gcs_repo_sync import GCSRepoSync
 from thoth.ingestion.parsers import ParserFactory
 from thoth.ingestion.repo_manager import HandbookRepoManager
-from thoth.ingestion.sources.config import SourceConfig
 from thoth.shared.embedder import Embedder
+from thoth.shared.sources.config import SourceConfig
 from thoth.shared.vector_store import VectorStore
 
 logger = logging.getLogger(__name__)

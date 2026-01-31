@@ -13,6 +13,12 @@ variable "region" {
   default     = "us-central1"
 }
 
+variable "environment" {
+  description = "Environment (dev, staging, prod)"
+  type        = string
+  default     = "dev"
+}
+
 variable "service_account_email" {
   description = "Service account email from shared module"
   type        = string
@@ -48,6 +54,7 @@ output "worker_url" {
   description = "URL of the Ingestion Worker Cloud Run service"
   value       = google_cloud_run_v2_service.thoth_ingestion_worker.uri
 }
+
 
 output "cloud_tasks_queue_name" {
   description = "Name of the Cloud Tasks queue"

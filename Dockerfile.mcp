@@ -35,6 +35,7 @@ COPY thoth/shared/vector_store.py ./thoth/shared/vector_store.py
 COPY thoth/shared/embedder.py ./thoth/shared/embedder.py
 COPY thoth/shared/gcs_sync.py ./thoth/shared/gcs_sync.py
 COPY thoth/shared/utils ./thoth/shared/utils/
+COPY thoth/shared/sources ./thoth/shared/sources/
 
 # Runtime stage
 FROM python:3.11-slim
