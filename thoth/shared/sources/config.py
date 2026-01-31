@@ -6,10 +6,11 @@ supported file formats.
 """
 
 from dataclasses import dataclass, field
-import logging
 import os
 
-logger = logging.getLogger(__name__)
+from thoth.shared.utils.logger import setup_logger
+
+logger = setup_logger(__name__)
 
 
 @dataclass

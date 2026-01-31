@@ -5,7 +5,6 @@ document embeddings with CRUD operations and optional GCS backup.
 """
 
 import importlib.util
-import logging
 from pathlib import Path
 from typing import Any
 
@@ -13,8 +12,9 @@ import chromadb
 from chromadb.config import Settings
 
 from thoth.shared.embedder import Embedder
+from thoth.shared.utils.logger import setup_logger
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 class VectorStore:

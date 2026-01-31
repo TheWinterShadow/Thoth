@@ -4,13 +4,13 @@ This module provides parsing for Markdown files with support for
 YAML frontmatter extraction.
 """
 
-import logging
 from pathlib import Path
 import re
 
 from thoth.ingestion.parsers.base import DocumentParser, ParsedDocument
+from thoth.shared.utils.logger import setup_logger
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 class MarkdownParser(DocumentParser):

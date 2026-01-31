@@ -3,12 +3,12 @@
 This module provides parsing for plain text files.
 """
 
-import logging
 from pathlib import Path
 
 from thoth.ingestion.parsers.base import DocumentParser, ParsedDocument
+from thoth.shared.utils.logger import setup_logger
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 class TextParser(DocumentParser):

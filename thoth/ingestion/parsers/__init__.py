@@ -11,7 +11,6 @@ Example:
     >>> print(doc.content)
 """
 
-import logging
 from pathlib import Path
 from typing import ClassVar
 
@@ -20,8 +19,9 @@ from thoth.ingestion.parsers.docx import DocxParser
 from thoth.ingestion.parsers.markdown import MarkdownParser
 from thoth.ingestion.parsers.pdf import PDFParser
 from thoth.ingestion.parsers.text import TextParser
+from thoth.shared.utils.logger import setup_logger
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 __all__ = [
     "DocumentParser",

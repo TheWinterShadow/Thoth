@@ -5,12 +5,13 @@ to/from Google Cloud Storage for persistence and disaster recovery.
 """
 
 from datetime import datetime, timezone
-import logging
 import os
 from pathlib import Path
 import shutil
 
-logger = logging.getLogger(__name__)
+from thoth.shared.utils.logger import setup_logger
+
+logger = setup_logger(__name__)
 
 try:
     from google.cloud import storage  # type: ignore[attr-defined]

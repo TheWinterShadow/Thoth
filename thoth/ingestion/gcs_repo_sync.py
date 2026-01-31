@@ -5,7 +5,6 @@ This module handles syncing the GitLab handbook between GCS and local storage:
 2. Sync from GCS to local /tmp on Cloud Run startup
 """
 
-import logging
 from pathlib import Path
 import shutil
 import tempfile
@@ -14,7 +13,9 @@ from typing import Any
 from git import Repo
 from google.cloud import storage  # type: ignore[attr-defined]
 
-logger = logging.getLogger(__name__)
+from thoth.shared.utils.logger import setup_logger
+
+logger = setup_logger(__name__)
 
 
 class GCSRepoSync:

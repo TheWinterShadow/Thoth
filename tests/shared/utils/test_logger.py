@@ -1,453 +1,587 @@
-"""
-Comprehensive test suite for the secure logging module.
+"""Comprehensive test suite for the structured logging module.
 
-This module contains extensive tests for the horizon_core.logging module,
-ensuring that sensitive data redaction works correctly across various scenarios
-and that the logging functionality is robust and reliable.
+This module contains extensive tests for the thoth.shared.utils.logger module,
+ensuring that:
+- Structured JSON logging works correctly for GCP Cloud Logging
+- Sensitive data redaction works across various scenarios
+- JobLoggerAdapter properly adds context to all log messages
+- Backward compatibility is maintained with SecureLogger
 
 Test Coverage:
-    - SensitiveDataFormatter redaction patterns and edge cases
-    - SecureLogger error handling and method behavior
-    - setup_logger function configuration and reuse logic
-    - Integration testing between components
-    - Performance and reliability under various conditions
-
-Key Test Areas:
-    1. Sensitive Data Redaction:
-       - Various keyword patterns (password, token, API key, etc.)
-       - Different separators (is, :, =)
-       - Case sensitivity handling
-       - Multiple sensitive values in one message
-       - Edge cases and false positive prevention
-
-    2. Logger Configuration:
-       - Proper logger creation and setup
-       - Handler configuration and formatter assignment
-       - Logger reuse and duplicate prevention
-       - Level setting and inheritance
-
-    3. Error Handling:
-       - Malformed format strings
-       - Missing arguments
-       - Non-string message types
-       - Exception safety during logging calls
-
-    4. Format Compatibility:
-       - Simple vs detailed format modes
-       - Timestamp and metadata inclusion
-       - Custom format string handling
-
-Example Usage:
-    Run all tests:
-        python -m pytest tests/utils/test_logger.py -v
-
-    Run specific test class:
-        python -m pytest tests/utils/test_logger.py::TestLoggingModule -v
-
-    Run with coverage:
-        python -m pytest tests/utils/test_logger.py --cov=horizon_core.logging
+    - GCPStructuredFormatter JSON output and field population
+    - SimpleFormatter text output with redaction
+    - JobLoggerAdapter context injection
+    - Trace context handling
+    - Sensitive data redaction patterns
+    - setup_logger configuration
+    - Backward compatibility (SecureLogger, SensitiveDataFormatter)
 """
 
 import io
+import json
 import logging
+import os
 import unittest
 from unittest.mock import patch
 
-from thoth.shared.utils.logger import SecureLogger, SensitiveDataFormatter, setup_logger
+from thoth.shared.utils.logger import (
+    GCPStructuredFormatter,
+    JobLoggerAdapter,
+    SecureLogger,
+    SensitiveDataFormatter,
+    SimpleFormatter,
+    configure_root_logger,
+    extract_trace_id_from_header,
+    get_job_logger,
+    get_trace_context,
+    set_trace_context,
+    setup_logger,
+)
 
 
-class TestLoggingModule(unittest.TestCase):
-    """
-    Main test class for the secure logging module.
+class TestGCPStructuredFormatter(unittest.TestCase):
+    """Test the GCPStructuredFormatter JSON output."""
 
-    This class contains comprehensive tests for all components of the logging module,
-    including the SensitiveDataFormatter, SecureLogger, and setup_logger function.
-    Each test method focuses on specific functionality and edge cases.
-    """
+    def setUp(self) -> None:
+        """Set up test fixtures."""
+        self.formatter = GCPStructuredFormatter()
 
-    def setUp(self):
-        """
-        Set up test fixtures before each test method.
-
-        Creates logger instances that will be used across multiple test methods
-        to ensure consistent behavior and prevent test interference.
-        """
-        # Create a default logger with sensitive data redaction enabled
-        # This uses the SensitiveDataFormatter with detailed format
-        self.default_logger = setup_logger("test_default_logger", level=logging.DEBUG)
-
-        # Create a simple logger without sensitive data redaction
-        # This uses the basic Formatter with simple format for performance testing
-        self.simple_logger = setup_logger("test_simple_logger", level=logging.DEBUG, simple=True)
-
-    def test_default_logger_format(self):
-        """
-        Test that the default logger uses the correct detailed format.
-
-        Verifies that the default logger produces log messages with the expected
-        format including logger name, level, and message. This ensures the
-        SensitiveDataFormatter is properly configured with the detailed format.
-        """
-        # Create a mock log record to test formatting
-        log_record = logging.LogRecord(
-            name="test_default_logger",  # Logger name
-            level=logging.INFO,  # Log level
-            pathname="",  # Source file path (not used)
-            lineno=0,  # Line number (not used)
-            msg="Test message",  # The actual log message
-            args=(),  # Format arguments (none in this case)
-            # Exception info (none in this case)
+    def test_basic_json_output(self) -> None:
+        """Test that formatter produces valid JSON."""
+        record = logging.LogRecord(
+            name="test.logger",
+            level=logging.INFO,
+            pathname="/app/thoth/test.py",
+            lineno=42,
+            msg="Test message",
+            args=(),
             exc_info=None,
         )
+        record.funcName = "test_function"
 
-        # Format the record using the logger's formatter
-        formatted_message = self.default_logger.handlers[0].formatter.format(log_record)
+        formatted = self.formatter.format(record)
 
-        # Verify the formatted message contains expected components
-        # The detailed format should include: timestamp - logger_name - level - message
-        self.assertIn(" - test_default_logger - INFO - Test message", formatted_message)
+        # Should be valid JSON
+        parsed = json.loads(formatted)
+        self.assertIsInstance(parsed, dict)
 
-    def test_simple_logger_format(self):
-        """
-        Test that the simple logger uses the basic format without redaction.
-
-        Verifies that when simple=True is used, the logger uses the basic
-        formatter with just level and message, without the overhead of
-        sensitive data redaction for performance-critical scenarios.
-        """
-        # Create a mock log record for simple format testing
-        log_record = logging.LogRecord(
-            # Logger name (not shown in simple format)
-            name="test_simple_logger",
-            level=logging.INFO,  # Log level (shown as "INFO:")
-            pathname="",  # Source file path (not used)
-            lineno=0,  # Line number (not used)
-            msg="Test message",  # The actual log message
-            args=(),  # Format arguments (none in this case)
-            # Exception info (none in this case)
+    def test_standard_fields(self) -> None:
+        """Test that standard fields are populated correctly."""
+        record = logging.LogRecord(
+            name="test.logger",
+            level=logging.WARNING,
+            pathname="/app/thoth/module/file.py",
+            lineno=100,
+            msg="Warning message",
+            args=(),
             exc_info=None,
         )
+        record.funcName = "my_function"
 
-        # Format the record using the simple logger's formatter
-        formatted_message = self.simple_logger.handlers[0].formatter.format(log_record)
+        formatted = self.formatter.format(record)
+        parsed = json.loads(formatted)
 
-        # Verify the simple format only includes the essential information
-        # Simple format should be: "LEVEL: message" (no timestamp, no logger name)
-        self.assertIn("Test message", formatted_message)
+        # Check standard fields
+        self.assertEqual(parsed["severity"], "WARNING")
+        self.assertEqual(parsed["logger"], "test.logger")
+        self.assertIn("Warning message", parsed["message"])
+        self.assertIn("timestamp", parsed)
 
-    def test_sensitive_info_redaction(self):
-        """
-        Test that sensitive information is properly redacted from log messages.
+    def test_verbose_source_location(self) -> None:
+        """Test that verbose source location fields are included."""
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="/app/thoth/ingestion/pipeline.py",
+            lineno=456,
+            msg="Test",
+            args=(),
+            exc_info=None,
+        )
+        record.funcName = "_process_file"
 
-        This is a core security test that verifies the primary functionality
-        of the logging module: automatically detecting and redacting sensitive
-        data patterns to prevent information leaks in log files.
+        formatted = self.formatter.format(record)
+        parsed = json.loads(formatted)
 
-        Tests multiple common patterns:
-        - "keyword is value" format
-        - "keyword: value" format
-        - "keyword=value" format
-        """
-        # Define test cases with various sensitive data patterns
+        # Check verbose fields
+        self.assertEqual(parsed["lineno"], 456)
+        self.assertEqual(parsed["funcName"], "_process_file")
+        self.assertIn("pipeline.py", parsed["filename"])
+        self.assertEqual(parsed["module"], "pipeline")
+
+    def test_gcp_source_location(self) -> None:
+        """Test that GCP sourceLocation field is properly formatted."""
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="/app/thoth/ingestion/worker.py",
+            lineno=123,
+            msg="Test",
+            args=(),
+            exc_info=None,
+        )
+        record.funcName = "process_batch"
+
+        formatted = self.formatter.format(record)
+        parsed = json.loads(formatted)
+
+        source_location = parsed.get("logging.googleapis.com/sourceLocation")
+        self.assertIsNotNone(source_location)
+        self.assertIn("thoth/ingestion/worker.py", source_location["file"])
+        self.assertEqual(source_location["line"], "123")
+        self.assertEqual(source_location["function"], "process_batch")
+
+    def test_sensitive_data_redaction(self) -> None:
+        """Test that sensitive data is redacted in JSON output."""
         sensitive_messages = [
-            "User password is secret123",  # Tests "is" separator pattern
-            "API key: abcdefghijklmnop",  # Tests colon separator pattern
-            "Authorization token=xyz789",  # Tests equals separator pattern
+            ("password is secret123", "secret123"),
+            ("API key: abcdefghijklmnop", "abcdefghijklmnop"),
+            ("token=xyz789", "xyz789"),
         ]
 
-        # Test each sensitive message pattern
-        for message in sensitive_messages:
-            # Create a log record for the sensitive message
-            log_record = logging.LogRecord(
-                name="test_logger",
+        for msg, sensitive_value in sensitive_messages:
+            record = logging.LogRecord(
+                name="test",
                 level=logging.INFO,
                 pathname="",
                 lineno=0,
-                msg=message,  # The sensitive message to test
+                msg=msg,
                 args=(),
                 exc_info=None,
             )
 
-            # Format the record using the secure formatter
-            formatted_message = self.default_logger.handlers[0].formatter.format(log_record)
+            formatted = self.formatter.format(record)
+            parsed = json.loads(formatted)
 
-            # Verify that all sensitive values have been redacted
-            # None of the actual sensitive values should appear in the output
-            self.assertNotIn("secret123", formatted_message)
-            self.assertNotIn("abcdefghijklmnop", formatted_message)
-            self.assertNotIn("xyz789", formatted_message)
+            self.assertNotIn(sensitive_value, parsed["message"])
+            self.assertIn("[REDACTED]", parsed["message"])
 
-            # Verify that the redaction marker is present
-            # This confirms that redaction occurred rather than message being dropped
-            self.assertIn("[REDACTED]", formatted_message)
-
-    def test_non_sensitive_info(self):
-        """
-        Test that non-sensitive messages are not modified by the redaction process.
-
-        This test ensures that the redaction logic doesn't interfere with normal
-        log messages and only acts on messages that match sensitive data patterns.
-        This prevents false positives and maintains log message integrity.
-        """
-        # Test with a completely normal message that should not trigger redaction
-        message = "This is a regular log message."
-
-        # Create a log record for the normal message
-        log_record = logging.LogRecord(
-            name="test_logger",
+    def test_job_context_fields(self) -> None:
+        """Test that job context fields are included when present."""
+        record = logging.LogRecord(
+            name="test",
             level=logging.INFO,
             pathname="",
             lineno=0,
-            msg=message,
+            msg="Processing",
+            args=(),
+            exc_info=None,
+        )
+        record.job_id = "job_abc123"
+        record.source = "handbook"
+        record.collection = "handbook_docs"
+        record.operation = "chunking"
+
+        formatted = self.formatter.format(record)
+        parsed = json.loads(formatted)
+
+        self.assertEqual(parsed["job_id"], "job_abc123")
+        self.assertEqual(parsed["source"], "handbook")
+        self.assertEqual(parsed["collection"], "handbook_docs")
+        self.assertEqual(parsed["operation"], "chunking")
+
+    def test_metrics_fields(self) -> None:
+        """Test that metrics fields are included when present."""
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="Completed",
+            args=(),
+            exc_info=None,
+        )
+        record.files_processed = 42
+        record.chunks_created = 156
+        record.duration_ms = 1250
+
+        formatted = self.formatter.format(record)
+        parsed = json.loads(formatted)
+
+        self.assertEqual(parsed["files_processed"], 42)
+        self.assertEqual(parsed["chunks_created"], 156)
+        self.assertEqual(parsed["duration_ms"], 1250)
+
+    def test_gcp_labels(self) -> None:
+        """Test that GCP labels are populated from job context."""
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="Test",
+            args=(),
+            exc_info=None,
+        )
+        record.job_id = "job_xyz"
+        record.source = "dnd"
+
+        formatted = self.formatter.format(record)
+        parsed = json.loads(formatted)
+
+        labels = parsed.get("logging.googleapis.com/labels")
+        self.assertIsNotNone(labels)
+        self.assertEqual(labels["job_id"], "job_xyz")
+        self.assertEqual(labels["source"], "dnd")
+
+
+class TestSimpleFormatter(unittest.TestCase):
+    """Test the SimpleFormatter text output."""
+
+    def setUp(self) -> None:
+        """Set up test fixtures."""
+        self.formatter = SimpleFormatter()
+
+    def test_basic_format(self) -> None:
+        """Test basic text formatting."""
+        record = logging.LogRecord(
+            name="test.logger",
+            level=logging.INFO,
+            pathname="/app/test.py",
+            lineno=10,
+            msg="Test message",
+            args=(),
+            exc_info=None,
+        )
+        record.funcName = "test_func"
+
+        formatted = self.formatter.format(record)
+
+        self.assertIn("test.logger", formatted)
+        self.assertIn("INFO", formatted)
+        self.assertIn("Test message", formatted)
+        self.assertIn("test_func", formatted)
+        self.assertIn("10", formatted)
+
+    def test_sensitive_data_redaction(self) -> None:
+        """Test that sensitive data is redacted in text output."""
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="password is secret123",
             args=(),
             exc_info=None,
         )
 
-        # Format the record and verify it remains unchanged
-        formatted_message = self.default_logger.handlers[0].formatter.format(log_record)
+        formatted = self.formatter.format(record)
 
-        # The original message should be preserved exactly
-        self.assertIn(message, formatted_message)
-
-        # No redaction should have occurred for non-sensitive content
-        self.assertNotIn("[REDACTED]", formatted_message)
-
-    def test_logger_levels(self):
-        """Test that different log levels work correctly."""
-        debug_logger = setup_logger("debug_logger", level=logging.DEBUG)
-        info_logger = setup_logger("info_logger", level=logging.INFO)
-        warning_logger = setup_logger("warning_logger", level=logging.WARNING)
-
-        self.assertEqual(debug_logger.level, logging.DEBUG)
-        self.assertEqual(info_logger.level, logging.INFO)
-        self.assertEqual(warning_logger.level, logging.WARNING)
-
-    def test_secure_logger_instance(self):
-        """Test that setup_logger returns a SecureLogger instance."""
-        logger = setup_logger("secure_test")
-        self.assertIsInstance(logger, SecureLogger)
-
-    def test_sensitive_data_formatter_direct(self):
-        """Test SensitiveDataFormatter directly."""
-        formatter = SensitiveDataFormatter("%(message)s")
-
-        test_cases = [
-            ("password is mypass123", "password is [REDACTED]"),
-            ("API key: abc123def456", "API key: [REDACTED]"),
-            ("token=secretvalue", "token=[REDACTED]"),
-            # Fixed expectation
-            ("authorization: bearer", "authorization: [REDACTED]"),
-            ("Normal message", "Normal message"),
-        ]
-
-        for input_msg, expected in test_cases:
-            record = logging.LogRecord("test", logging.INFO, "", 0, input_msg, (), None)
-            formatted = formatter.format(record)
-            self.assertEqual(formatted, expected)
-
-    def test_multiple_sensitive_values_in_message(self):
-        """
-        Test redaction when multiple sensitive values are present in one message.
-
-        This test ensures that the formatter can handle complex log messages
-        containing multiple different types of sensitive information and
-        redacts all of them properly. This is important for comprehensive
-        security coverage in real-world logging scenarios.
-        """
-        # Create a formatter for direct testing
-        formatter = SensitiveDataFormatter("%(message)s")
-
-        # Create a message with multiple sensitive values of different types
-        message = "User password is secret123 and API key: abcdef123456"
-
-        # Create a log record with the multi-sensitive message
-        record = logging.LogRecord("test", logging.INFO, "", 0, message, (), None)
-
-        # Format the message and verify all sensitive data is redacted
-        formatted = formatter.format(record)
-
-        # Verify that both sensitive values have been removed
-        # Password value should be gone
         self.assertNotIn("secret123", formatted)
-        # API key value should be gone
-        self.assertNotIn("abcdef123456", formatted)
+        self.assertIn("[REDACTED]", formatted)
 
-        # Verify that exactly two redactions occurred
-        # This confirms both sensitive patterns were detected and handled
-        self.assertEqual(formatted.count("[REDACTED]"), 2)
 
-    def test_case_insensitive_redaction(self):
-        """Test that redaction works regardless of case."""
-        formatter = SensitiveDataFormatter("%(message)s")
+class TestJobLoggerAdapter(unittest.TestCase):
+    """Test the JobLoggerAdapter context injection."""
 
-        test_cases = [
-            "PASSWORD is secret123",
-            "Api Key: secret123",
-            "TOKEN=secret123",
-            "Authorization: secret123",
-        ]
+    def setUp(self) -> None:
+        """Set up test fixtures."""
+        # Create a logger with a handler we can inspect
+        self.base_logger = logging.Logger("test.job")
+        self.base_logger.setLevel(logging.DEBUG)
+        self.stream = io.StringIO()
+        handler = logging.StreamHandler(self.stream)
+        handler.setFormatter(GCPStructuredFormatter())
+        self.base_logger.addHandler(handler)
 
-        for message in test_cases:
-            record = logging.LogRecord("test", logging.INFO, "", 0, message, (), None)
-            formatted = formatter.format(record)
-            self.assertNotIn("secret123", formatted)
-            self.assertIn("[REDACTED]", formatted)
+    def test_context_injection(self) -> None:
+        """Test that job context is injected into log messages."""
+        adapter = JobLoggerAdapter(
+            self.base_logger,
+            job_id="job_test123",
+            source="handbook",
+            collection="handbook_docs",
+        )
 
-    def test_secure_logger_methods(self):
-        """
-        Test all logging methods of SecureLogger for proper functionality.
+        adapter.info("Test message")
 
-        Verifies that all logging level methods (debug, info, warning, error, critical)
-        work correctly without raising exceptions. This test focuses on method
-        availability and basic functionality rather than output verification.
-        """
-        # Create a logger for testing all methods
-        logger = setup_logger("method_test")
+        output = self.stream.getvalue()
+        parsed = json.loads(output.strip())
 
-        # Capture output to prevent console spam during testing
-        # We don't need to verify the output content, just that methods don't crash
-        with patch("sys.stdout", new_callable=io.StringIO):
-            # Test each logging method to ensure they work without exceptions
-            logger.debug("Debug message")  # Lowest priority level
-            logger.info("Info message")  # Informational messages
-            logger.warning("Warning message")  # Warning conditions
-            logger.error("Error message")  # Error conditions
-            logger.critical("Critical message")  # Critical conditions
+        self.assertEqual(parsed["job_id"], "job_test123")
+        self.assertEqual(parsed["source"], "handbook")
+        self.assertEqual(parsed["collection"], "handbook_docs")
 
-    def test_secure_logger_with_args(self):
-        """
-        Test SecureLogger with string formatting arguments.
+    def test_extra_merge(self) -> None:
+        """Test that extra fields are merged with context."""
+        adapter = JobLoggerAdapter(
+            self.base_logger,
+            job_id="job_123",
+            source="handbook",
+        )
 
-        Verifies that the logger correctly handles format strings with arguments,
-        including cases where the formatted result contains sensitive information
-        that should be redacted by the formatter.
-        """
-        # Create a logger for testing argument formatting
-        logger = setup_logger("args_test")
+        adapter.info("Processing", extra={"file_path": "readme.md", "chunks_created": 5})
 
-        # Capture output to prevent console spam during testing
-        with patch("sys.stdout", new_callable=io.StringIO):
-            # Test formatting with multiple arguments, including sensitive data
-            # The formatter should redact "secret123" after string formatting occurs
-            logger.info("User %s has password %s", "john", "secret123")
+        output = self.stream.getvalue()
+        parsed = json.loads(output.strip())
 
-            # Test single argument formatting with sensitive data
-            # The formatter should redact "abcdef123" after formatting
-            logger.info("API key is %s", "abcdef123")
+        # Job context should be present
+        self.assertEqual(parsed["job_id"], "job_123")
+        # Extra fields should also be present
+        self.assertEqual(parsed.get("file_path"), "readme.md")
+        self.assertEqual(parsed.get("chunks_created"), 5)
 
-    def test_secure_logger_exception_handling(self):
-        """
-        Test SecureLogger handles formatting exceptions gracefully.
+    def test_with_operation(self) -> None:
+        """Test creating child logger with operation context."""
+        adapter = JobLoggerAdapter(
+            self.base_logger,
+            job_id="job_456",
+            source="dnd",
+        )
 
-        This is a critical safety test that ensures the logger never crashes
-        the application due to malformed log calls. The logger should handle
-        various error conditions gracefully and continue functioning.
-        """
-        # Create a logger for testing exception handling
-        logger = setup_logger("exception_test")
+        chunk_logger = adapter.with_operation("chunking")
+        chunk_logger.info("Chunking file")
 
-        # Capture output to prevent console spam during testing
-        with patch("sys.stdout", new_callable=io.StringIO):
-            # Test mismatched format arguments - should not raise TypeError
-            # Logger should handle the formatting error and log something reasonable
-            # Format string without corresponding argument
-            logger.info("Missing arg: %s")
+        output = self.stream.getvalue()
+        parsed = json.loads(output.strip())
 
-            # Test logging None values - should not raise AttributeError
-            # Logger should convert None to string representation
-            logger.info(None)
+        self.assertEqual(parsed["job_id"], "job_456")
+        self.assertEqual(parsed["operation"], "chunking")
 
-            # Test logging non-string objects - should not raise formatting errors
-            # Logger should convert numeric values to string representation
-            logger.info(123)
 
-    def test_no_duplicate_handlers(self):
-        """
-        Test that calling setup_logger multiple times doesn't create duplicate handlers.
+class TestTraceContext(unittest.TestCase):
+    """Test trace context handling for Cloud Run."""
 
-        This test ensures proper logger management and prevents issues like
-        duplicate log messages or memory leaks from accumulating handlers.
-        The setup_logger function should reuse existing loggers when possible.
-        """
-        # Create two loggers with the same name - should get the same instance
-        # Use unique names to avoid interference with other tests
-        logger1 = setup_logger("unique_duplicate_test_1")
-        # Same name as logger1
-        logger2 = setup_logger("unique_duplicate_test_1")
+    def test_extract_trace_id_from_header(self) -> None:
+        """Test extracting trace ID from X-Cloud-Trace-Context header."""
+        # Standard format
+        header = "105445aa7843bc8bf206b12000100000/1;o=1"
+        trace_id = extract_trace_id_from_header(header)
+        self.assertEqual(trace_id, "105445aa7843bc8bf206b12000100000")
 
-        # Verify both loggers have exactly one handler (no duplicates)
-        self.assertEqual(len(logger1.handlers), 1)
-        self.assertEqual(len(logger2.handlers), 1)
+        # Without span
+        header = "105445aa7843bc8bf206b12000100000"
+        trace_id = extract_trace_id_from_header(header)
+        self.assertEqual(trace_id, "105445aa7843bc8bf206b12000100000")
 
-        # Verify that both variables reference the same logger object
-        # This confirms proper logger reuse and singleton behavior
+        # None
+        trace_id = extract_trace_id_from_header(None)
+        self.assertIsNone(trace_id)
+
+        # Empty
+        trace_id = extract_trace_id_from_header("")
+        self.assertIsNone(trace_id)
+
+    def test_set_and_get_trace_context(self) -> None:
+        """Test setting and getting trace context."""
+        # Clear any existing context
+        set_trace_context(None)
+        self.assertIsNone(get_trace_context())
+
+        # Set context
+        set_trace_context("trace123")
+        self.assertEqual(get_trace_context(), "trace123")
+
+        # Clear again
+        set_trace_context(None)
+        self.assertIsNone(get_trace_context())
+
+
+class TestSetupLogger(unittest.TestCase):
+    """Test the setup_logger function."""
+
+    def test_creates_logger(self) -> None:
+        """Test that setup_logger creates a working logger."""
+        logger = setup_logger("test.setup.create")
+        self.assertIsNotNone(logger)
+        self.assertEqual(logger.name, "test.setup.create")
+
+    def test_logger_level(self) -> None:
+        """Test that logger level is set correctly."""
+        logger = setup_logger("test.setup.level", level=logging.DEBUG)
+        self.assertEqual(logger.level, logging.DEBUG)
+
+        logger2 = setup_logger("test.setup.level2", level=logging.WARNING)
+        self.assertEqual(logger2.level, logging.WARNING)
+
+    def test_simple_mode(self) -> None:
+        """Test that simple mode uses SimpleFormatter."""
+        logger = setup_logger("test.setup.simple", simple=True)
+        self.assertIsInstance(logger.handlers[0].formatter, SimpleFormatter)
+
+    def test_json_mode(self) -> None:
+        """Test that JSON mode uses GCPStructuredFormatter."""
+        logger = setup_logger("test.setup.json", json_output=True)
+        self.assertIsInstance(logger.handlers[0].formatter, GCPStructuredFormatter)
+
+    def test_no_duplicate_handlers(self) -> None:
+        """Test that calling setup_logger twice doesn't create duplicate handlers."""
+        logger1 = setup_logger("test.setup.nodupe")
+        handler_count1 = len(logger1.handlers)
+
+        logger2 = setup_logger("test.setup.nodupe")
+        handler_count2 = len(logger2.handlers)
+
+        self.assertEqual(handler_count1, handler_count2)
         self.assertIs(logger1, logger2)
 
-    def test_edge_case_redaction_patterns(self):
-        """
-        Test edge cases in redaction patterns to prevent false positives.
+    @patch.dict(os.environ, {"GCS_BUCKET_NAME": "test-bucket", "GCP_PROJECT_ID": "test-project"})
+    def test_auto_json_in_cloud_run(self) -> None:
+        """Test that JSON output is auto-enabled in Cloud Run environment."""
+        # Clear any cached logger
+        logger_name = "test.setup.cloudrun"
+        existing = logging.getLogger(logger_name)
+        existing.handlers.clear()
 
-        This test ensures that the redaction logic is precise and doesn't
-        accidentally redact legitimate content. It tests various boundary
-        conditions and partial matches that should NOT trigger redaction.
+        logger = setup_logger(logger_name)
+        self.assertIsInstance(logger.handlers[0].formatter, GCPStructuredFormatter)
 
-        This is critical for maintaining log integrity while providing security.
-        """
-        # Create a formatter for direct testing
-        formatter = SensitiveDataFormatter("%(message)s")
 
-        # Define edge cases that should NOT be redacted
-        # Each tuple contains (input_message, expected_output)
-        edge_cases = [
-            # Incomplete patterns - missing values
-            ("password:", "password:"),  # Colon but no value
-            ("password =", "password ="),  # Equals but no value
-            ("password is", "password is"),  # 'is' but no value
-            # Equals but no value (no space)
-            ("password=", "password="),
-            # Word boundary tests - should not match partial words
-            ("not_password is value", "not_password is value"),  # Underscore prefix
-            ("mypassword is secret", "mypassword is secret"),  # No word boundary
-            # Pattern variations that don't match the expected format
-            # Wrong separator word
-            ("password in value", "password in value"),
+class TestGetJobLogger(unittest.TestCase):
+    """Test the get_job_logger helper function."""
+
+    def test_creates_adapter(self) -> None:
+        """Test that get_job_logger creates a JobLoggerAdapter."""
+        base_logger = setup_logger("test.getjob")
+        job_logger = get_job_logger(base_logger, job_id="job_789", source="personal")
+
+        self.assertIsInstance(job_logger, JobLoggerAdapter)
+        self.assertEqual(job_logger.extra["job_id"], "job_789")
+        self.assertEqual(job_logger.extra["source"], "personal")
+
+
+class TestBackwardCompatibility(unittest.TestCase):
+    """Test backward compatibility with old API."""
+
+    def test_secure_logger_exists(self) -> None:
+        """Test that SecureLogger class is still available."""
+        logger = SecureLogger("test.compat.secure")
+        self.assertIsInstance(logger, logging.Logger)
+
+    def test_sensitive_data_formatter_alias(self) -> None:
+        """Test that SensitiveDataFormatter is aliased to SimpleFormatter."""
+        formatter = SensitiveDataFormatter()
+        self.assertIsInstance(formatter, SimpleFormatter)
+
+    def test_secure_logger_methods(self) -> None:
+        """Test that SecureLogger has all standard logging methods."""
+        logger = SecureLogger("test.compat.methods")
+        handler = logging.StreamHandler(io.StringIO())
+        logger.addHandler(handler)
+
+        # All methods should work without errors
+        logger.debug("Debug message")
+        logger.info("Info message")
+        logger.warning("Warning message")
+        logger.error("Error message")
+        logger.critical("Critical message")
+
+    def test_secure_logger_safe_formatting(self) -> None:
+        """Test that SecureLogger handles malformed format strings."""
+        logger = SecureLogger("test.compat.format")
+        handler = logging.StreamHandler(io.StringIO())
+        logger.addHandler(handler)
+
+        # Should not raise exceptions
+        logger.info("Missing arg: %s")
+        logger.info(None)
+        logger.info(123)
+
+
+class TestSensitiveDataRedaction(unittest.TestCase):
+    """Test sensitive data redaction patterns."""
+
+    def setUp(self) -> None:
+        """Set up test fixtures."""
+        self.formatter = GCPStructuredFormatter()
+
+    def test_password_patterns(self) -> None:
+        """Test various password patterns."""
+        patterns = [
+            ("password is secret123", "secret123"),
+            ("PASSWORD: mypass", "mypass"),
+            ("passwd=abc123", "abc123"),
+            ("pwd is test", "test"),
         ]
 
-        # Test each edge case to ensure no false positive redaction occurs
-        for input_msg, expected in edge_cases:
-            # Create a log record for the edge case
-            record = logging.LogRecord("test", logging.INFO, "", 0, input_msg, (), None)
+        for msg, sensitive in patterns:
+            record = logging.LogRecord("test", logging.INFO, "", 0, msg, (), None)
+            formatted = self.formatter.format(record)
+            parsed = json.loads(formatted)
+            self.assertNotIn(sensitive, parsed["message"], f"Failed for: {msg}")
 
-            # Format the message
-            formatted = formatter.format(record)
+    def test_token_patterns(self) -> None:
+        """Test various token patterns."""
+        patterns = [
+            ("token is abc123", "abc123"),
+            ("API token: xyz789", "xyz789"),
+            ("bearer=mytoken", "mytoken"),
+            ("jwt: eyJhbGc", "eyJhbGc"),
+        ]
 
-            # Verify the message was NOT redacted (remains exactly as expected)
-            self.assertEqual(formatted, expected, f"Failed for input: {input_msg}")
+        for msg, sensitive in patterns:
+            record = logging.LogRecord("test", logging.INFO, "", 0, msg, (), None)
+            formatted = self.formatter.format(record)
+            parsed = json.loads(formatted)
+            self.assertNotIn(sensitive, parsed["message"], f"Failed for: {msg}")
+
+    def test_case_insensitive_redaction(self) -> None:
+        """Test that redaction is case insensitive."""
+        patterns = [
+            "PASSWORD is secret",
+            "Password: secret",
+            "password=secret",
+            "TOKEN is secret",
+            "Token: secret",
+        ]
+
+        for msg in patterns:
+            record = logging.LogRecord("test", logging.INFO, "", 0, msg, (), None)
+            formatted = self.formatter.format(record)
+            parsed = json.loads(formatted)
+            self.assertNotIn("secret", parsed["message"], f"Failed for: {msg}")
+            self.assertIn("[REDACTED]", parsed["message"], f"No redaction for: {msg}")
+
+    def test_non_sensitive_not_redacted(self) -> None:
+        """Test that non-sensitive data is not redacted."""
+        messages = [
+            "This is a regular log message",
+            "Processing file readme.md",
+            "Completed 42 chunks in 1.5 seconds",
+            "Error: file not found",
+        ]
+
+        for msg in messages:
+            record = logging.LogRecord("test", logging.INFO, "", 0, msg, (), None)
+            formatted = self.formatter.format(record)
+            parsed = json.loads(formatted)
+            self.assertEqual(parsed["message"], msg)
+            self.assertNotIn("[REDACTED]", parsed["message"])
+
+    def test_multiple_sensitive_values(self) -> None:
+        """Test redaction of multiple sensitive values in one message."""
+        msg = "User password is secret123 and API key: abcdef"
+        record = logging.LogRecord("test", logging.INFO, "", 0, msg, (), None)
+        formatted = self.formatter.format(record)
+        parsed = json.loads(formatted)
+
+        self.assertNotIn("secret123", parsed["message"])
+        self.assertNotIn("abcdef", parsed["message"])
+        self.assertEqual(parsed["message"].count("[REDACTED]"), 2)
 
 
-# Additional test considerations for future development:
-#
-# 1. Performance Tests:
-#    - Measure redaction overhead with large log volumes
-#    - Compare simple vs secure logger performance
-#    - Test memory usage with long-running loggers
-#
-# 2. Integration Tests:
-#    - Test with real application scenarios
-#    - Test with different log handlers (file, network, etc.)
-#    - Test with log rotation and archival
-#
-# 3. Security Tests:
-#    - Test with various encoding schemes (base64, URL encoding, etc.)
-#    - Test with obfuscated sensitive data patterns
-#    - Test with custom sensitive keywords
-#
-# 4. Concurrency Tests:
-#    - Test thread safety of formatter and logger
-#    - Test performance under concurrent logging load
-#    - Test logger creation in multi-threaded environments
-#
-# 5. Configuration Tests:
-#    - Test with different log levels and filtering
-#    - Test with custom format strings
-#    - Test with environment-specific configurations
+class TestConfigureRootLogger(unittest.TestCase):
+    """Test the configure_root_logger function."""
+
+    def test_configures_root_logger(self) -> None:
+        """Test that configure_root_logger sets up the root logger."""
+        configure_root_logger(level=logging.WARNING)
+        root = logging.getLogger()
+        self.assertEqual(root.level, logging.WARNING)
+
+    def test_removes_existing_handlers(self) -> None:
+        """Test that existing handlers are removed."""
+        root = logging.getLogger()
+
+        # Add some handlers
+        root.addHandler(logging.StreamHandler())
+        root.addHandler(logging.StreamHandler())
+
+        configure_root_logger()
+
+        # Should have exactly one handler now
+        self.assertEqual(len(root.handlers), 1)
+
+
+if __name__ == "__main__":
+    unittest.main()

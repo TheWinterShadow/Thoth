@@ -25,9 +25,17 @@ from thoth.ingestion.job_manager import Job, JobManager, JobStats, JobStatus
 from thoth.ingestion.pipeline import IngestionPipeline, PipelineStats
 from thoth.shared.health import HealthCheck
 from thoth.shared.sources.config import SourceConfig, SourceRegistry
+from thoth.shared.utils.logger import (
+    configure_root_logger,
+    extract_trace_id_from_header,
+    get_job_logger,
+    set_trace_context,
+    setup_logger,
+)
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Configure root logger for the application
+configure_root_logger(level=logging.INFO)
+logger = setup_logger(__name__)
 
 # Batch prefix pattern for parallel processing
 BATCH_PREFIX_PATTERN = "chroma_db_batch_"
@@ -111,6 +119,11 @@ async def ingest(request: Request) -> JSONResponse:
     Returns:
         202 Accepted with job_id for status polling
     """
+    # Extract trace context from Cloud Run headers for log correlation
+    trace_header = request.headers.get("X-Cloud-Trace-Context")
+    trace_id = extract_trace_id_from_header(trace_header)
+    set_trace_context(trace_id, os.getenv("GCP_PROJECT_ID"))
+
     try:
         body = await request.json()
         source_name = body.get("source")
@@ -163,15 +176,24 @@ async def ingest(request: Request) -> JSONResponse:
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
 
-async def _run_ingestion_job(job: Job, source_config: SourceConfig, params: dict) -> None:
+async def _run_ingestion_job(job: Job, source_config: SourceConfig, params: dict[str, Any]) -> None:
     """Run ingestion job in background.
 
     Updates job status in Firestore as processing progresses.
     """
     job_manager = get_job_manager()
 
+    # Create job-scoped logger for correlation
+    job_logger = get_job_logger(
+        logger,
+        job_id=job.job_id,
+        source=source_config.name,
+        collection=source_config.collection_name,
+    )
+
     try:
         job_manager.mark_running(job)
+        job_logger.info("Starting ingestion job")
 
         # Create pipeline for this source
         pipeline = IngestionPipeline(
@@ -180,7 +202,9 @@ async def _run_ingestion_job(job: Job, source_config: SourceConfig, params: dict
         )
 
         # Run ingestion
-        force = params.get("force", False)
+        force: bool = params.get("force", False)
+        job_logger.info("Running pipeline", extra={"force": force, "incremental": not force})
+
         stats: PipelineStats = await asyncio.get_event_loop().run_in_executor(
             None,
             lambda: pipeline.run(force_reclone=force, incremental=not force),
@@ -196,6 +220,17 @@ async def _run_ingestion_job(job: Job, source_config: SourceConfig, params: dict
         )
         job_manager.mark_completed(job, job_stats)
 
+        job_logger.info(
+            "Ingestion completed",
+            extra={
+                "total_files": stats.total_files,
+                "files_processed": stats.processed_files,
+                "failed": stats.failed_files,
+                "chunks_created": stats.total_chunks,
+                "duration_ms": int(stats.duration_seconds * 1000),
+            },
+        )
+
         # Sync to GCS
         gcs_prefix = f"chroma_db_{source_config.collection_name}"
         await asyncio.get_event_loop().run_in_executor(
@@ -203,10 +238,13 @@ async def _run_ingestion_job(job: Job, source_config: SourceConfig, params: dict
             pipeline.vector_store.sync_to_gcs,
             gcs_prefix,
         )
-        logger.info("Synced collection '%s' to GCS prefix '%s'", source_config.collection_name, gcs_prefix)
+        job_logger.info("Synced collection to GCS", extra={"gcs_prefix": gcs_prefix})
 
     except Exception as e:
-        logger.exception("Job %s failed", job.job_id)
+        job_logger.exception(
+            "Job failed",
+            extra={"error_type": type(e).__name__, "error_message": str(e)},
+        )
         job_manager.mark_failed(job, str(e))
 
 
@@ -287,6 +325,11 @@ async def process_batch(request: Request) -> JSONResponse:
     Each batch is stored in a unique GCS prefix to avoid conflicts during
     parallel processing. Use /merge-batches to consolidate.
     """
+    # Extract trace context for log correlation
+    trace_header = request.headers.get("X-Cloud-Trace-Context")
+    trace_id = extract_trace_id_from_header(trace_header)
+    set_trace_context(trace_id, os.getenv("GCP_PROJECT_ID"))
+
     try:
         body = await request.json()
         start_index = body.get("start_index")
@@ -305,7 +348,18 @@ async def process_batch(request: Request) -> JSONResponse:
         if batch_id is None:
             batch_id = f"{start_index}_{end_index}_{uuid.uuid4().hex[:8]}"
 
-        logger.info("Processing batch %s: files %d-%d", batch_id, start_index, end_index)
+        # Create batch-scoped logger
+        batch_logger = get_job_logger(
+            logger,
+            job_id=batch_id,
+            source=collection_name,
+            collection=collection_name,
+            operation="batch_processing",
+        )
+        batch_logger.info(
+            "Processing batch",
+            extra={"start_index": start_index, "end_index": end_index},
+        )
 
         # Get source config if available
         registry = get_source_registry()
@@ -334,12 +388,22 @@ async def process_batch(request: Request) -> JSONResponse:
         )
 
         if sync_result:
-            logger.info(
-                "Synced batch %s to GCS prefix '%s': %d files",
-                batch_id,
-                batch_gcs_prefix,
-                sync_result.get("uploaded_files", 0),
+            batch_logger.info(
+                "Synced batch to GCS",
+                extra={
+                    "gcs_prefix": batch_gcs_prefix,
+                    "uploaded_files": sync_result.get("uploaded_files", 0),
+                },
             )
+
+        batch_logger.info(
+            "Batch processing completed",
+            extra={
+                "successful": result.get("successful", 0),
+                "failed": result.get("failed", 0),
+                "duration_ms": int(result.get("duration_seconds", 0) * 1000),
+            },
+        )
 
         return JSONResponse(
             {
@@ -351,7 +415,10 @@ async def process_batch(request: Request) -> JSONResponse:
         )
 
     except Exception as e:
-        logger.exception("Failed to process batch")
+        logger.exception(
+            "Failed to process batch",
+            extra={"error_type": type(e).__name__, "error_message": str(e)},
+        )
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
 

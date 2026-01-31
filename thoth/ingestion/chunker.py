@@ -22,6 +22,8 @@ from pathlib import Path
 import re
 from typing import Any
 
+from thoth.shared.utils.logger import setup_logger
+
 # Constants
 DEFAULT_MIN_CHUNK_SIZE = 500  # Minimum tokens per chunk
 DEFAULT_MAX_CHUNK_SIZE = 1000  # Maximum tokens per chunk
@@ -135,7 +137,7 @@ class MarkdownChunker:
         self.min_chunk_size = min_chunk_size
         self.max_chunk_size = max_chunk_size
         self.overlap_size = overlap_size
-        self.logger = logger or logging.getLogger(__name__)
+        self.logger = logger or setup_logger(__name__)
 
         # Validate configuration
         if self.overlap_size >= self.min_chunk_size:
@@ -529,7 +531,7 @@ class DocumentChunker:
         self.min_chunk_size = min_chunk_size
         self.max_chunk_size = max_chunk_size
         self.overlap_size = overlap_size
-        self.logger = logger or logging.getLogger(__name__)
+        self.logger = logger or setup_logger(__name__)
 
         # Use MarkdownChunker for markdown-specific processing
         self._markdown_chunker = MarkdownChunker(

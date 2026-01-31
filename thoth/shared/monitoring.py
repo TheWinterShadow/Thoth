@@ -9,15 +9,14 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 import json
-import logging
 from pathlib import Path
 import shutil
 import threading
 from typing import Any
 
-from thoth.shared.utils.logger import setup_logger
+from thoth.shared.utils.logger import logging, setup_logger
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 __all__ = [
     "HealthCheck",

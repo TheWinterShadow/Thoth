@@ -21,9 +21,10 @@ from thoth.ingestion.parsers import ParserFactory
 from thoth.ingestion.repo_manager import HandbookRepoManager
 from thoth.shared.embedder import Embedder
 from thoth.shared.sources.config import SourceConfig
+from thoth.shared.utils.logger import setup_logger
 from thoth.shared.vector_store import VectorStore
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 # Constants
 DEFAULT_STATE_FILE = "pipeline_state.json"
@@ -263,7 +264,11 @@ class IngestionPipeline:
             all_files.extend(files)
             self.logger.debug("Found %d %s files", len(files), ext)
 
-        self.logger.info("Found %d total files for source '%s'", len(all_files), self.source_config.name)
+        self.logger.info(
+            "Found %d total files for source '%s'",
+            len(all_files),
+            self.source_config.name,
+        )
         return all_files
 
     def get_file_list(self) -> list[str]:

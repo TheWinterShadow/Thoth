@@ -8,7 +8,6 @@ Authentication is handled at the Cloud Run ingress level via IAM.
 
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
-import logging
 from typing import Any
 
 from starlette.requests import Request
@@ -18,9 +17,10 @@ import uvicorn
 
 from thoth.mcp.server.server import ThothMCPServer
 from thoth.shared.health import HealthCheck
+from thoth.shared.utils.logger import configure_root_logger, setup_logger
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+configure_root_logger()
+logger = setup_logger(__name__)
 
 
 class HealthHTTPHandler(BaseHTTPRequestHandler):

@@ -1,11 +1,12 @@
 """Google Cloud Secret Manager integration for secure credential management."""
 
 from functools import lru_cache
-import logging
 import os
 from typing import Any
 
-logger = logging.getLogger(__name__)
+from thoth.shared.utils.logger import setup_logger
+
+logger = setup_logger(__name__)
 
 
 class SecretManagerClient:

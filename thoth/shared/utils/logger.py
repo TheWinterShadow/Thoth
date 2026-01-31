@@ -1,395 +1,585 @@
-"""Secure Logging Utilities - Standardized logging with automatic sensitive data redaction.
+"""Structured Logging Utilities for GCP Cloud Logging and Grafana Loki.
 
-This module provides a secure logging framework for HorizonSec tools that automatically
-detects and redacts sensitive information from log messages to prevent data leaks.
-
-The module includes:
-- SecureLogger: A logger class that extends Python's standard logging.Logger
-- SensitiveDataFormatter: A formatter that redacts sensitive patterns from log messages
-- setup_logger: A convenience function to create pre-configured secure loggers
+This module provides a structured JSON logging framework that is compatible with:
+- Google Cloud Logging (Cloud Run, GKE, Cloud Functions)
+- Grafana Loki
+- Any JSON-aware log aggregation system
 
 Key Features:
-- Automatic detection of sensitive patterns (passwords, API keys, tokens, etc.)
-- Case-insensitive pattern matching with word boundary detection
-- Graceful error handling for malformed log messages
-- Support for both detailed and simple log formats
-- Prevention of duplicate handlers when creating multiple loggers with the same name
-
-Security Considerations:
-- All sensitive data is replaced with "[REDACTED]" before being written to logs
-- Redaction happens at the formatter level, ensuring no sensitive data reaches log handlers
-- Word boundary matching prevents false positives on partial keyword matches
-- Multiple sensitive values in a single message are all properly redacted
+- Structured JSON output with consistent field schema
+- GCP Cloud Logging special fields (sourceLocation, trace, labels)
+- Job/request correlation via JobLoggerAdapter
+- Automatic sensitive data redaction
+- Verbose source location (file, line, function)
+- Metrics-ready numeric fields for dashboards
 
 Example:
-    >>> from horizon_core import setup_logger
-    >>> import logging
+    >>> from thoth.shared.utils.logger import setup_logger, get_job_logger
     >>>
-    >>> logger = setup_logger("myapp", level=logging.INFO)
-    >>> logger.info("User password is secret123")  # Logs: "User password is [REDACTED]"
-    >>> logger.info("API key: abc123def")  # Logs: "API key: [REDACTED]"
+    >>> # Basic usage
+    >>> logger = setup_logger("myapp")
+    >>> logger.info("Server started", extra={"port": 8080})
+    >>>
+    >>> # Job-scoped logging
+    >>> job_logger = get_job_logger(logger, job_id="job_123", source="handbook")
+    >>> job_logger.info("Processing file", extra={"file_path": "docs/readme.md"})
 """
 
-from logging import INFO, NOTSET, Formatter, Logger, LogRecord, StreamHandler, getLogger
+from collections.abc import MutableMapping
+from contextvars import ContextVar
+from datetime import datetime, timezone
+import logging
+import os
 import re
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
-# Default log format - includes timestamp, logger name, level, and message
-DEFAULT_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+from pythonjsonlogger.json import JsonFormatter as jsonlogger_JsonFormatter
 
-# Simple log format - just level and message (useful for console output)
-SIMPLE_FORMAT = "%(levelname)s: %(message)s"
+# Context variable for trace ID (extracted from Cloud Run headers)
+_trace_context: ContextVar[str | None] = ContextVar("trace_context", default=None)
+
+# GCP Project ID for trace URL construction
+_gcp_project_id: ContextVar[str | None] = ContextVar("gcp_project_id", default=None)
 
 
-class SensitiveDataFormatter(Formatter):
-    """Custom formatter that automatically redacts sensitive information from log messages.
+def set_trace_context(trace_id: str | None, project_id: str | None = None) -> None:
+    """Set the trace context for the current request/task.
 
-    This formatter extends the standard logging.Formatter to provide automatic detection
-    and redaction of sensitive data patterns before log messages are written to any handler.
+    Call this at the start of each request handler to enable log correlation.
 
-    The formatter uses regex patterns with word boundaries to ensure accurate detection
-    while avoiding false positives. It supports case-insensitive matching and handles
-    multiple common patterns for sensitive data.
+    Args:
+        trace_id: The trace ID from X-Cloud-Trace-Context header
+        project_id: GCP project ID for constructing full trace URL
+    """
+    _trace_context.set(trace_id)
+    if project_id:
+        _gcp_project_id.set(project_id)
 
-    Attributes:
-        SENSITIVE_KEYWORDS (list): List of keywords that are considered sensitive.
-                                 These keywords trigger redaction when found in specific patterns.
 
-    Supported Patterns:
-        - "keyword is value" format: "password is secret123" → "password is [REDACTED]"
-        - "keyword: value" format: "API key: abc123" → "API key: [REDACTED]"
-        - "keyword=value" format: "token=xyz789" → "token=[REDACTED]"
+def get_trace_context() -> str | None:
+    """Get the current trace context."""
+    return _trace_context.get()
 
-    Example:
-        >>> formatter = SensitiveDataFormatter("%(levelname)s: %(message)s")
-        >>> record = logging.LogRecord(
-        ...     "test", logging.INFO, "", 0, "password is secret", (), None
-        ... )
-        >>> formatted = formatter.format(record)
-        >>> print(formatted)  # "INFO: password is [REDACTED]"
+
+def extract_trace_id_from_header(header_value: str | None) -> str | None:
+    """Extract trace ID from X-Cloud-Trace-Context header.
+
+    The header format is: TRACE_ID/SPAN_ID;o=TRACE_TRUE
+
+    Args:
+        header_value: The X-Cloud-Trace-Context header value
+
+    Returns:
+        The trace ID portion, or None if header is missing/invalid
+    """
+    if not header_value:
+        return None
+    # Extract just the trace ID (before the /)
+    return header_value.split("/")[0] if "/" in header_value else header_value
+
+
+class GCPStructuredFormatter(jsonlogger_JsonFormatter):
+    """JSON formatter compatible with GCP Cloud Logging and Grafana Loki.
+
+    This formatter produces structured JSON logs with:
+    - Standard fields (timestamp, severity, message, logger)
+    - Verbose source location (pathname, filename, lineno, funcName)
+    - GCP special fields (sourceLocation, trace, labels)
+    - Custom context fields (job_id, source, operation, etc.)
+    - Automatic sensitive data redaction
+
+    The output is compatible with:
+    - GCP Cloud Logging (jsonPayload with special field recognition)
+    - Grafana Loki (JSON parsing and label extraction)
+    - Any JSON-aware log aggregation system
+
+    Example output:
+        {
+            "timestamp": "2026-01-30T10:15:30.123456Z",
+            "severity": "INFO",
+            "message": "Processing file",
+            "logger": "thoth.ingestion.pipeline",
+            "pathname": "/app/thoth/ingestion/pipeline.py",
+            "filename": "pipeline.py",
+            "lineno": 456,
+            "funcName": "_process_file",
+            "module": "pipeline",
+            "logging.googleapis.com/sourceLocation": {
+                "file": "thoth/ingestion/pipeline.py",
+                "line": "456",
+                "function": "_process_file"
+            },
+            "job_id": "job_xyz789",
+            "source": "handbook"
+        }
     """
 
     # Keywords that indicate sensitive information
-    # These are matched with word boundaries to prevent false positives
     SENSITIVE_KEYWORDS: ClassVar[list[str]] = [
-        "password",  # User passwords
-        "passwd",  # Alternative password spelling
-        "pwd",  # Short form of password
-        "secret",  # Generic secrets
-        "token",  # Authentication tokens
-        "apikey",  # API keys (single word)
-        "api_key",  # API keys (underscore separated)
-        "auth",  # Authentication data
-        "authorization",  # Authorization headers/data
-        "credential",  # Generic credentials
-        "key",  # Generic keys (private keys, etc.)
-        "private",  # Private keys/data
-        "session",  # Session identifiers
-        "cookie",  # HTTP cookies
-        "jwt",  # JSON Web Tokens
-        "bearer",  # Bearer tokens
-        "oauth",  # OAuth tokens/data
+        "password",
+        "passwd",
+        "pwd",
+        "secret",
+        "token",
+        "apikey",
+        "api_key",
+        "auth",
+        "authorization",
+        "credential",
+        "key",
+        "private",
+        "session",
+        "cookie",
+        "jwt",
+        "bearer",
+        "oauth",
     ]
 
-    def format(self, record: LogRecord) -> str:
-        """Format the log record and redact any sensitive information.
+    # Compiled regex patterns for sensitive data redaction
+    _redaction_patterns: ClassVar[list[tuple[re.Pattern[str], str]]] = []
 
-        This method first formats the log record using the parent formatter,
-        then applies regex patterns to detect and redact sensitive data.
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        """Initialize the formatter with GCP-compatible settings."""
+        # Use a simple format string - we'll build the JSON ourselves
+        super().__init__(*args, **kwargs)
 
-        Args:
-            record (logging.LogRecord): The log record to format and redact.
+        # Compile redaction patterns once
+        if not GCPStructuredFormatter._redaction_patterns:
+            keywords_pattern = "|".join(self.SENSITIVE_KEYWORDS)
+            GCPStructuredFormatter._redaction_patterns = [
+                (
+                    re.compile(rf"\b({keywords_pattern})(\s+is\s+)(\S+)", re.IGNORECASE),
+                    r"\1\2[REDACTED]",
+                ),
+                (
+                    re.compile(rf"\b({keywords_pattern})(\s*:\s+)(\S+)", re.IGNORECASE),
+                    r"\1\2[REDACTED]",
+                ),
+                (
+                    re.compile(rf"\b({keywords_pattern})(\s*=\s*)(\S+)", re.IGNORECASE),
+                    r"\1\2[REDACTED]",
+                ),
+            ]
 
-        Returns:
-            str: The formatted log message with sensitive data redacted.
+    def _redact_sensitive_data(self, message: str) -> str:
+        """Redact sensitive data from a message string."""
+        for pattern, replacement in self._redaction_patterns:
+            message = pattern.sub(replacement, message)
+        return message
 
-        Note:
-            Redaction is performed using regex substitution with case-insensitive matching.
-            Multiple sensitive values in the same message will all be redacted.
+    def add_fields(  # noqa: PLR0912
+        self,
+        log_record: dict[str, Any],
+        record: logging.LogRecord,
+        message_dict: dict[str, Any],
+    ) -> None:
+        """Add custom fields to the JSON log record.
+
+        This method is called by python-json-logger to populate the log record.
+        We add all our custom fields here.
         """
-        # First, format the record using the standard formatter
-        # This gives us the complete log message with timestamp, level, etc.
-        formatted = super().format(record)
+        super().add_fields(log_record, record, message_dict)
 
-        # Define redaction patterns for different sensitive data formats
-        # Each pattern captures: (keyword)(separator)(value) and replaces value with [REDACTED]
-        patterns = [
-            # Pattern 1: "keyword is value" (e.g., "User password is secret123")
-            # \b ensures word boundary, \s+ matches one or more spaces
+        # === Standard Fields ===
+        log_record["timestamp"] = datetime.now(timezone.utc).isoformat()
+        log_record["severity"] = record.levelname
+        log_record["logger"] = record.name
+
+        # Redact sensitive data from message
+        if "message" in log_record:
+            log_record["message"] = self._redact_sensitive_data(str(log_record["message"]))
+
+        # === Verbose Source Location ===
+        log_record["pathname"] = record.pathname
+        log_record["filename"] = record.filename
+        log_record["lineno"] = record.lineno
+        log_record["funcName"] = record.funcName
+        log_record["module"] = record.module
+
+        # === GCP Special Fields ===
+        # sourceLocation - makes logs clickable in GCP Console
+        # Use relative path for cleaner display
+        relative_path = record.pathname
+        if "/thoth/" in relative_path:
+            relative_path = "thoth/" + relative_path.split("/thoth/", 1)[1]
+
+        log_record["logging.googleapis.com/sourceLocation"] = {
+            "file": relative_path,
+            "line": str(record.lineno),
+            "function": record.funcName,
+        }
+
+        # Trace correlation
+        trace_id = get_trace_context()
+        project_id = _gcp_project_id.get() or os.getenv("GCP_PROJECT_ID")
+        if trace_id and project_id:
+            log_record["logging.googleapis.com/trace"] = f"projects/{project_id}/traces/{trace_id}"
+
+        # === Job Context Fields (from extra) ===
+        # These are added via extra={} or JobLoggerAdapter
+        context_fields = [
+            "job_id",
+            "source",
+            "collection",
+            "operation",
+            "batch_id",
+            "request_id",
+        ]
+        for field in context_fields:
+            if hasattr(record, field):
+                value = getattr(record, field)
+                if value is not None:
+                    log_record[field] = value
+
+        # === Metrics Fields (from extra) ===
+        metric_fields = [
+            "files_processed",
+            "chunks_created",
+            "duration_ms",
+            "total_files",
+            "successful",
+            "failed",
+            "documents_count",
+        ]
+        for field in metric_fields:
+            if hasattr(record, field):
+                value = getattr(record, field)
+                if value is not None:
+                    log_record[field] = value
+
+        # === Error Context (from extra) ===
+        error_fields = ["error_type", "error_message", "file_path", "stack_trace"]
+        for field in error_fields:
+            if hasattr(record, field):
+                value = getattr(record, field)
+                if value is not None:
+                    log_record[field] = self._redact_sensitive_data(str(value)) if isinstance(value, str) else value
+
+        # === GCP Labels (for filtering) ===
+        # Build labels from job context
+        labels: dict[str, str] = {}
+        if hasattr(record, "job_id") and record.job_id:
+            labels["job_id"] = str(record.job_id)
+        if hasattr(record, "source") and record.source:
+            labels["source"] = str(record.source)
+        if hasattr(record, "operation") and record.operation:
+            labels["operation"] = str(record.operation)
+
+        if labels:
+            log_record["logging.googleapis.com/labels"] = labels
+
+        # === Process/Thread Info ===
+        log_record["process"] = record.process
+        log_record["processName"] = record.processName
+        log_record["thread"] = record.thread
+        log_record["threadName"] = record.threadName
+
+        # Remove None values to keep logs clean
+        keys_to_remove = [k for k, v in log_record.items() if v is None]
+        for key in keys_to_remove:
+            del log_record[key]
+
+
+class SimpleFormatter(logging.Formatter):
+    """Simple text formatter for local development/debugging.
+
+    Uses a human-readable format without JSON structure.
+    Still includes sensitive data redaction.
+    """
+
+    # Same sensitive keywords as GCPStructuredFormatter
+    SENSITIVE_KEYWORDS: ClassVar[list[str]] = GCPStructuredFormatter.SENSITIVE_KEYWORDS
+
+    def __init__(self, fmt: str | None = None, **kwargs: Any) -> None:
+        """Initialize with default format if not provided."""
+        if fmt is None:
+            fmt = "%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s"
+        super().__init__(fmt, **kwargs)
+
+        # Compile redaction patterns
+        self._patterns: list[tuple[re.Pattern[str], str]] = []
+        keywords_pattern = "|".join(self.SENSITIVE_KEYWORDS)
+        self._patterns = [
             (
-                r"\b({})(\s+is\s+)(\S+)".format("|".join(self.SENSITIVE_KEYWORDS)),
+                re.compile(rf"\b({keywords_pattern})(\s+is\s+)(\S+)", re.IGNORECASE),
                 r"\1\2[REDACTED]",
             ),
-            # Pattern 2: "keyword: value" (e.g., "API key: abcdefghijklmnop")
-            # \s* allows optional spaces around the colon
             (
-                r"\b({})(\s*:\s+)(\S+)".format("|".join(self.SENSITIVE_KEYWORDS)),
+                re.compile(rf"\b({keywords_pattern})(\s*:\s+)(\S+)", re.IGNORECASE),
                 r"\1\2[REDACTED]",
             ),
-            # Pattern 3: "keyword=value" (e.g., "Authorization token=xyz789")
-            # \s* allows optional spaces around the equals sign
             (
-                r"\b({})(\s*=\s*)(\S+)".format("|".join(self.SENSITIVE_KEYWORDS)),
+                re.compile(rf"\b({keywords_pattern})(\s*=\s*)(\S+)", re.IGNORECASE),
                 r"\1\2[REDACTED]",
             ),
         ]
 
-        # Apply each redaction pattern to the formatted message
-        # Use IGNORECASE flag to catch variations in capitalization
-        for pattern, replacement in patterns:
-            formatted = re.sub(pattern, replacement, formatted, flags=re.IGNORECASE)
-
+    def format(self, record: logging.LogRecord) -> str:
+        """Format the record with sensitive data redaction."""
+        formatted = super().format(record)
+        for pattern, replacement in self._patterns:
+            formatted = pattern.sub(replacement, formatted)
         return formatted
 
 
-def setup_logger(name: str, level: int = INFO, simple: bool = False) -> Logger:
-    """Creates and configures a secure logger with automatic sensitive data redaction.
+class JobLoggerAdapter(logging.LoggerAdapter):
+    """Logger adapter that automatically includes job context in all log messages.
 
-    This function is the main entry point for creating secure loggers in the application.
-    It handles logger reuse, prevents duplicate handlers, and configures appropriate
-    formatters based on the security requirements.
-
-    Args:
-        name (str): Name of the logger. Should be unique within the application.
-                   Common practice is to use __name__ from the calling module.
-        level (int): Logging level threshold. Only messages at or above this level
-                    will be processed. Defaults to logging.INFO.
-                    Common values: logging.DEBUG, logging.INFO, logging.WARNING,
-                    logging.ERROR, logging.CRITICAL
-        simple (bool): If True, uses a simple format with just level and message.
-                      If False (default), uses detailed format with timestamp,
-                      logger name, level, and message. Simple format does NOT
-                      include sensitive data redaction.
-
-    Returns:
-        logging.Logger: A configured SecureLogger instance with automatic
-                       sensitive data redaction (unless simple=True).
-
-    Note:
-        - If a logger with the same name already exists and is a SecureLogger,
-          it will be returned without modification
-        - When simple=True, sensitive data redaction is NOT applied for performance
-        - The logger uses StreamHandler to output to stderr by default
+    This adapter enriches log messages with job-specific context like job_id,
+    source, and collection. Use this when processing a specific job to ensure
+    all logs can be correlated.
 
     Example:
-        >>> logger = setup_logger("myapp", level=logging.DEBUG)
-        >>> logger.info("Database password is secret123")  # Redacted output
-        >>>
-        >>> simple_logger = setup_logger("console", simple=True)
-        >>> simple_logger.info("Quick message")  # No redaction, faster output
+        >>> base_logger = setup_logger("thoth.worker")
+        >>> job_logger = JobLoggerAdapter(base_logger, job_id="job_123", source="handbook")
+        >>> job_logger.info("Processing started")
+        >>> job_logger.info("File processed", extra={"file_path": "readme.md"})
     """
-    # Check if a logger with this name already exists and is properly configured
-    # This prevents creating duplicate handlers and maintains logger singleton behavior
-    existing_logger = getLogger(name)
-    if existing_logger.handlers and isinstance(existing_logger, SecureLogger):
+
+    def __init__(
+        self,
+        logger: logging.Logger,
+        job_id: str,
+        source: str | None = None,
+        collection: str | None = None,
+        **extra_context: Any,
+    ) -> None:
+        """Initialize the job logger adapter.
+
+        Args:
+            logger: The base logger to wrap
+            job_id: Unique identifier for the job/run
+            source: Source being processed (e.g., "handbook", "dnd")
+            collection: Collection name being used
+            **extra_context: Additional context to include in all logs
+        """
+        context = {
+            "job_id": job_id,
+            "source": source,
+            "collection": collection,
+            **extra_context,
+        }
+        # Remove None values
+        context = {k: v for k, v in context.items() if v is not None}
+        super().__init__(logger, context)
+
+    def process(self, msg: str, kwargs: MutableMapping[str, Any]) -> tuple[str, MutableMapping[str, Any]]:
+        """Process the log message to include job context.
+
+        Args:
+            msg: The log message
+            kwargs: Keyword arguments for the log call
+
+        Returns:
+            Tuple of (message, kwargs) with context added to extra
+        """
+        # Merge our context into extra
+        extra = kwargs.get("extra", {})
+        if self.extra:
+            extra.update(self.extra)
+        kwargs["extra"] = extra
+        return msg, kwargs
+
+    def with_operation(self, operation: str) -> "JobLoggerAdapter":
+        """Create a child logger for a specific operation.
+
+        Args:
+            operation: The operation name (e.g., "chunking", "embedding", "storing")
+
+        Returns:
+            A new JobLoggerAdapter with the operation context added
+        """
+        current_extra = self.extra or {}
+        return JobLoggerAdapter(
+            self.logger,
+            job_id=cast("str", current_extra.get("job_id", "unknown")),
+            source=cast("str | None", current_extra.get("source")),
+            collection=cast("str | None", current_extra.get("collection")),
+            operation=operation,
+        )
+
+
+# Legacy alias for backward compatibility
+class SecureLogger(logging.Logger):
+    """Legacy SecureLogger class for backward compatibility.
+
+    New code should use setup_logger() which returns a standard Logger
+    with GCPStructuredFormatter attached.
+
+    This class is maintained for backward compatibility with existing code
+    that checks isinstance(logger, SecureLogger).
+    """
+
+    SENSITIVE_KEYWORDS: ClassVar[list[str]] = GCPStructuredFormatter.SENSITIVE_KEYWORDS
+
+    def __init__(self, name: str, level: int = logging.NOTSET) -> None:
+        """Initialize the SecureLogger."""
+        super().__init__(name, level)
+
+    def _safe_format(self, msg: Any, args: tuple[Any, ...]) -> str:
+        """Safely format a message with arguments."""
+        try:
+            return msg % args if args and isinstance(msg, str) else str(msg)
+        except (TypeError, ValueError):
+            return str(msg)
+
+    def debug(self, msg: Any, *args: Any, **kwargs: Any) -> None:
+        """Log a debug message with safe formatting."""
+        super().debug(self._safe_format(msg, args), **kwargs)
+
+    def info(self, msg: Any, *args: Any, **kwargs: Any) -> None:
+        """Log an info message with safe formatting."""
+        super().info(self._safe_format(msg, args), **kwargs)
+
+    def warning(self, msg: Any, *args: Any, **kwargs: Any) -> None:
+        """Log a warning message with safe formatting."""
+        super().warning(self._safe_format(msg, args), **kwargs)
+
+    def error(self, msg: Any, *args: Any, **kwargs: Any) -> None:
+        """Log an error message with safe formatting."""
+        super().error(self._safe_format(msg, args), **kwargs)
+
+    def critical(self, msg: Any, *args: Any, **kwargs: Any) -> None:
+        """Log a critical message with safe formatting."""
+        super().critical(self._safe_format(msg, args), **kwargs)
+
+
+# Legacy alias
+SensitiveDataFormatter = SimpleFormatter
+
+
+def setup_logger(
+    name: str,
+    level: int = logging.INFO,
+    simple: bool = False,
+    json_output: bool | None = None,
+) -> logging.Logger:
+    """Create and configure a logger with structured JSON output.
+
+    This function creates a logger that outputs structured JSON logs compatible
+    with GCP Cloud Logging and Grafana Loki. By default, it auto-detects whether
+    to use JSON output based on the environment.
+
+    Args:
+        name: Name of the logger (typically __name__)
+        level: Logging level (default: INFO)
+        simple: If True, use simple text format instead of JSON (for local dev)
+        json_output: Explicit control over JSON output. If None, auto-detects:
+                    - True in Cloud Run (GCS_BUCKET_NAME set)
+                    - True if LOG_FORMAT=json
+                    - False otherwise (local development)
+
+    Returns:
+        Configured logger instance
+
+    Example:
+        >>> logger = setup_logger(__name__)
+        >>> logger.info("Server started", extra={"port": 8080})
+
+        >>> # With job context
+        >>> logger.info("Processing", extra={"job_id": "abc123", "source": "handbook"})
+    """
+    # Check if logger already exists and is configured
+    existing_logger = logging.getLogger(name)
+    if existing_logger.handlers:
+        # Logger already configured, just update level if different
+        if existing_logger.level != level:
+            existing_logger.setLevel(level)
         return existing_logger
 
-    # Clear any existing handlers to prevent duplicate log messages
-    # This ensures clean state when reconfiguring loggers
-    existing_logger.handlers.clear()
+    # Auto-detect JSON output mode
+    if json_output is None:
+        # Use JSON in Cloud Run or if explicitly requested
+        in_cloud_run = bool(os.getenv("GCS_BUCKET_NAME") and os.getenv("GCP_PROJECT_ID"))
+        explicit_json = os.getenv("LOG_FORMAT", "").lower() == "json"
+        json_output = in_cloud_run or explicit_json
 
-    # Create a new SecureLogger instance with the specified name
-    # SecureLogger extends Python's Logger with security-aware methods
-    logger = SecureLogger(name)
-    logger.setLevel(level)
+    # For backward compatibility, simple=True forces text output
+    if simple:
+        json_output = False
 
-    # Create a console handler for output to stderr
-    handler = StreamHandler()
+    # Create logger (use SecureLogger for backward compatibility checks)
+    logger = SecureLogger(name, level)
 
-    # Configure formatter based on security requirements
-    # Simple format: no sensitive data redaction for performance
-    # Secure format: includes automatic sensitive data redaction
-    formatter = Formatter(SIMPLE_FORMAT) if simple else SensitiveDataFormatter(DEFAULT_FORMAT)
+    # Create handler
+    handler = logging.StreamHandler()
 
-    # Attach formatter to handler and handler to logger
+    # Choose formatter based on output mode
+    formatter = GCPStructuredFormatter() if json_output else SimpleFormatter()
+
     handler.setFormatter(formatter)
     logger.addHandler(handler)
 
-    # Register the logger in Python's logger registry
-    # This ensures proper logger hierarchy and name-based retrieval
-    Logger.manager.loggerDict[name] = logger
+    # Register in logger manager
+    logging.Logger.manager.loggerDict[name] = logger
 
     return logger
 
 
-class SecureLogger(Logger):
-    """A security-enhanced logger that provides safe handling of log messages.
+def get_job_logger(
+    base_logger: logging.Logger,
+    job_id: str,
+    source: str | None = None,
+    collection: str | None = None,
+    **extra_context: Any,
+) -> JobLoggerAdapter:
+    """Create a job-scoped logger adapter.
 
-    SecureLogger extends Python's standard Logger class to provide additional
-    safety measures for log message processing. While the actual sensitive data
-    redaction is handled by SensitiveDataFormatter, this logger provides
-    robust error handling to prevent logging failures from crashing applications.
+    This is the recommended way to create loggers for job processing.
+    All log messages will automatically include the job context.
 
-    Key Features:
-        - Graceful handling of malformed log messages
-        - Safe string formatting with automatic fallbacks
-        - Prevention of exceptions during log message processing
-        - Compatibility with all standard logging methods
+    Args:
+        base_logger: The base logger (from setup_logger)
+        job_id: Unique identifier for the job
+        source: Source being processed (e.g., "handbook")
+        collection: Collection name
+        **extra_context: Additional context fields
 
-    The logger handles various edge cases:
-        - Mismatched format strings and arguments
-        - Non-string message objects
-        - None values and other unexpected types
-        - Encoding issues and special characters
-
-    Attributes:
-        SENSITIVE_KEYWORDS (list): Legacy list of sensitive keywords.
-                                 Note: This is kept for backward compatibility
-                                 but actual redaction is handled by the formatter.
+    Returns:
+        JobLoggerAdapter with job context
 
     Example:
-        >>> logger = SecureLogger("myapp")
-        >>> logger.info("Normal message")  # Works normally
-        >>> logger.info("Message with %s", "argument")  # Safe formatting
-        >>> logger.info(None)  # Gracefully handles None
-        >>> logger.info("Missing arg: %s")  # Won't crash on missing args
+        >>> logger = setup_logger("thoth.worker")
+        >>> job_logger = get_job_logger(logger, job_id="job_123", source="handbook")
+        >>> job_logger.info("Starting ingestion")
+        >>> job_logger.info("Processed file", extra={"file_path": "readme.md", "chunks_created": 15})
     """
+    return JobLoggerAdapter(
+        base_logger,
+        job_id=job_id,
+        source=source,
+        collection=collection,
+        **extra_context,
+    )
 
-    # Legacy sensitive keywords list - kept for backward compatibility
-    # Note: Actual sensitive data redaction is now handled by SensitiveDataFormatter
-    SENSITIVE_KEYWORDS: ClassVar[list[str]] = [
-        "password",  # User passwords
-        "passwd",  # Alternative password spelling
-        "pwd",  # Short form of password
-        "secret",  # Generic secrets
-        "token",  # Authentication tokens
-        "apikey",  # API keys (single word)
-        "api_key",  # API keys (underscore separated)
-        "auth",  # Authentication data
-        "authorization",  # Authorization headers/data
-        "credential",  # Generic credentials
-        "key",  # Generic keys (private keys, etc.)
-        "private",  # Private keys/data
-        "session",  # Session identifiers
-        "cookie",  # HTTP cookies
-        "jwt",  # JSON Web Tokens
-        "bearer",  # Bearer tokens
-        "oauth",  # OAuth tokens/data
-    ]
 
-    def __init__(self, name: str, level: int = NOTSET) -> None:
-        """Initialize the SecureLogger with the specified name and level.
+def configure_root_logger(level: int = logging.INFO, json_output: bool | None = None) -> None:
+    """Configure the root logger for the application.
 
-        Args:
-            name (str): Name of the logger, typically the module name.
-            level (int): Minimum logging level. Defaults to NOTSET (inherits from parent).
-        """
-        super().__init__(name, level)
+    Call this once at application startup to configure global logging behavior.
 
-    def _redact(self, message: str) -> str:
-        """Legacy method for redacting sensitive information from messages.
+    Args:
+        level: Root logging level
+        json_output: Whether to use JSON output (auto-detects if None)
+    """
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
 
-        Note: This method is maintained for backward compatibility but is no longer
-        used in the current implementation. Sensitive data redaction is now handled
-        by the SensitiveDataFormatter at the formatter level, which is more efficient
-        and provides better coverage.
+    # Remove existing handlers
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
 
-        Args:
-            message (str): The message to potentially redact.
+    # Auto-detect JSON output mode
+    if json_output is None:
+        in_cloud_run = bool(os.getenv("GCS_BUCKET_NAME") and os.getenv("GCP_PROJECT_ID"))
+        explicit_json = os.getenv("LOG_FORMAT", "").lower() == "json"
+        json_output = in_cloud_run or explicit_json
 
-        Returns:
-            str: The message unchanged (redaction now happens at formatter level).
-        """
-        # Redaction now happens at the formatter level for better performance
-        # and more comprehensive pattern matching
-        return message
+    # Add new handler
+    handler = logging.StreamHandler()
+    if json_output:
+        handler.setFormatter(GCPStructuredFormatter())
+    else:
+        handler.setFormatter(SimpleFormatter())
 
-    def debug(self, msg: Any, *args: Any, **kwargs: Any) -> None:
-        """Log a debug message with safe formatting and error handling.
-
-        Args:
-            msg: The message to log. Can be a string, format string, or any object.
-            *args: Arguments for string formatting if msg is a format string.
-            **kwargs: Additional keyword arguments passed to the parent logger.
-
-        Note:
-            If string formatting fails, the message is converted to string safely.
-            This prevents logging calls from raising exceptions in production code.
-        """
-        try:
-            # Attempt string formatting if args are provided and msg is a string
-            formatted = msg % args if args and isinstance(msg, str) else msg
-        except (TypeError, ValueError):
-            # Handle formatting errors gracefully - convert to string representation
-            formatted = str(msg)
-        super().debug(str(formatted), **kwargs)
-
-    def info(self, msg: Any, *args: Any, **kwargs: Any) -> None:
-        """Log an info message with safe formatting and error handling.
-
-        Args:
-            msg: The message to log. Can be a string, format string, or any object.
-            *args: Arguments for string formatting if msg is a format string.
-            **kwargs: Additional keyword arguments passed to the parent logger.
-
-        Note:
-            If string formatting fails, the message is converted to string safely.
-            This prevents logging calls from raising exceptions in production code.
-        """
-        try:
-            # Attempt string formatting if args are provided and msg is a string
-            formatted = msg % args if args and isinstance(msg, str) else msg
-        except (TypeError, ValueError):
-            # Handle formatting errors gracefully - convert to string representation
-            formatted = str(msg)
-        super().info(str(formatted), **kwargs)
-
-    def warning(self, msg: Any, *args: Any, **kwargs: Any) -> None:
-        """Log a warning message with safe formatting and error handling.
-
-        Args:
-            msg: The message to log. Can be a string, format string, or any object.
-            *args: Arguments for string formatting if msg is a format string.
-            **kwargs: Additional keyword arguments passed to the parent logger.
-
-        Note:
-            If string formatting fails, the message is converted to string safely.
-            This prevents logging calls from raising exceptions in production code.
-        """
-        try:
-            # Attempt string formatting if args are provided and msg is a string
-            formatted = msg % args if args and isinstance(msg, str) else msg
-        except (TypeError, ValueError):
-            # Handle formatting errors gracefully - convert to string representation
-            formatted = str(msg)
-        super().warning(str(formatted), **kwargs)
-
-    def error(self, msg: Any, *args: Any, **kwargs: Any) -> None:
-        """Log an error message with safe formatting and error handling.
-
-        Args:
-            msg: The message to log. Can be a string, format string, or any object.
-            *args: Arguments for string formatting if msg is a format string.
-            **kwargs: Additional keyword arguments passed to the parent logger.
-
-        Note:
-            If string formatting fails, the message is converted to string safely.
-            This prevents logging calls from raising exceptions in production code.
-        """
-        try:
-            # Attempt string formatting if args are provided and msg is a string
-            formatted = msg % args if args and isinstance(msg, str) else msg
-        except (TypeError, ValueError):
-            # Handle formatting errors gracefully - convert to string representation
-            formatted = str(msg)
-        super().error(str(formatted), **kwargs)
-
-    def critical(self, msg: Any, *args: Any, **kwargs: Any) -> None:
-        """Log a critical message with safe formatting and error handling.
-
-        Args:
-            msg: The message to log. Can be a string, format string, or any object.
-            *args: Arguments for string formatting if msg is a format string.
-            **kwargs: Additional keyword arguments passed to the parent logger.
-
-        Note:
-            If string formatting fails, the message is converted to string safely.
-            This prevents logging calls from raising exceptions in production code.
-        """
-        try:
-            # Attempt string formatting if args are provided and msg is a string
-            formatted = msg % args if args and isinstance(msg, str) else msg
-        except (TypeError, ValueError):
-            # Handle formatting errors gracefully - convert to string representation
-            formatted = str(msg)
-        super().critical(str(formatted), **kwargs)
+    root_logger.addHandler(handler)

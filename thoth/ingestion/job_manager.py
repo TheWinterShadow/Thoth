@@ -7,12 +7,13 @@ operations using Google Cloud Firestore as the backend.
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-import logging
 import os
 from typing import Any
 import uuid
 
-logger = logging.getLogger(__name__)
+from thoth.shared.utils.logger import setup_logger
+
+logger = setup_logger(__name__)
 
 
 class JobStatus(Enum):
@@ -96,7 +97,7 @@ class Job:
             "source": self.source,
             "collection_name": self.collection_name,
             "started_at": self.started_at.isoformat(),
-            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "completed_at": (self.completed_at.isoformat() if self.completed_at else None),
             "stats": self.stats.to_dict(),
             "error": self.error,
         }
@@ -110,7 +111,7 @@ class Job:
             source=data["source"],
             collection_name=data["collection_name"],
             started_at=datetime.fromisoformat(data["started_at"]),
-            completed_at=datetime.fromisoformat(data["completed_at"]) if data.get("completed_at") else None,
+            completed_at=(datetime.fromisoformat(data["completed_at"]) if data.get("completed_at") else None),
             stats=JobStats.from_dict(data.get("stats", {})),
             error=data.get("error"),
         )
@@ -163,7 +164,10 @@ class JobManager:
 
                 self._db = firestore.Client(project=self._project_id)
                 self._collection = self._db.collection(self.COLLECTION_NAME)  # type: ignore[attr-defined]
-                logger.info("Initialized JobManager with Firestore (project: %s)", self._project_id)
+                logger.info(
+                    "Initialized JobManager with Firestore (project: %s)",
+                    self._project_id,
+                )
             except ImportError as e:
                 msg = "google-cloud-firestore is required. Install with: pip install google-cloud-firestore"
                 raise ImportError(msg) from e
@@ -241,7 +245,11 @@ class JobManager:
         if stats:
             job.stats = stats
         self.update_job(job)
-        logger.info("Job %s completed: %d files processed", job.job_id, job.stats.processed_files)
+        logger.info(
+            "Job %s completed: %d files processed",
+            job.job_id,
+            job.stats.processed_files,
+        )
 
     def mark_failed(self, job: Job, error: str) -> None:
         """Mark job as failed with error message.

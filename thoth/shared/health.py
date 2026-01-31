@@ -2,13 +2,14 @@
 
 import importlib.util
 import json
-import logging
 import os
 from pathlib import Path
 import sys
 from typing import Any
 
-logger = logging.getLogger(__name__)
+from thoth.shared.utils.logger import setup_logger
+
+logger = setup_logger(__name__)
 
 
 class HealthCheck:

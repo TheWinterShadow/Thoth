@@ -3,13 +3,13 @@
 This module provides parsing for Word documents using python-docx.
 """
 
-import logging
 from pathlib import Path
 from typing import Any
 
 from thoth.ingestion.parsers.base import DocumentParser, ParsedDocument
+from thoth.shared.utils.logger import setup_logger
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 class DocxParser(DocumentParser):

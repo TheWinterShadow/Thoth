@@ -11,6 +11,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from thoth.shared.utils.logger import setup_logger
 from thoth.shared.utils.secrets import get_secret_manager
 
 # Constants
@@ -84,10 +85,10 @@ class GitLabAPIClient:
                 secret_manager = get_secret_manager()
                 token = secret_manager.get_gitlab_token()
                 if token:
-                    logger = logger or logging.getLogger(__name__)
+                    logger = logger or setup_logger(__name__)
                     logger.debug("Retrieved GitLab token from Secret Manager")
             except Exception as e:  # noqa: BLE001
-                logger = logger or logging.getLogger(__name__)
+                logger = logger or setup_logger(__name__)
                 logger.debug("Could not retrieve token from Secret Manager: %s", e)
 
             # Fallback to environment variable
@@ -100,10 +101,10 @@ class GitLabAPIClient:
                 custom_url = secret_manager.get_gitlab_url()
                 if custom_url and custom_url != "https://gitlab.com":
                     base_url = custom_url
-                    logger = logger or logging.getLogger(__name__)
+                    logger = logger or setup_logger(__name__)
                     logger.debug("Using GitLab URL from Secret Manager: %s", base_url)
             except Exception as e:  # noqa: BLE001
-                logger = logger or logging.getLogger(__name__)
+                logger = logger or setup_logger(__name__)
                 logger.debug("Could not retrieve URL from Secret Manager: %s", e)
 
             # Fallback to environment variable
@@ -118,7 +119,7 @@ class GitLabAPIClient:
             base_url = f"{base_url}/api/v4"
         self.base_url = base_url
         self.timeout = timeout
-        self.logger = logger or logging.getLogger(__name__)
+        self.logger = logger or setup_logger(__name__)
 
         # Initialize session with retry strategy
         self.session = requests.Session()

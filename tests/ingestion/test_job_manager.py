@@ -200,7 +200,13 @@ class TestJobManager:
         mock_google_cloud = MagicMock()
         mock_google_cloud.firestore = mock_firestore
 
-        with patch.dict(sys.modules, {"google.cloud": mock_google_cloud, "google.cloud.firestore": mock_firestore}):
+        with patch.dict(
+            sys.modules,
+            {
+                "google.cloud": mock_google_cloud,
+                "google.cloud.firestore": mock_firestore,
+            },
+        ):
             manager = JobManager(project_id="test-project")
             # Access collection to trigger initialization
             _ = manager.collection
@@ -219,7 +225,13 @@ class TestJobManager:
         mock_google_cloud = MagicMock()
         mock_google_cloud.firestore = mock_firestore
 
-        with patch.dict(sys.modules, {"google.cloud": mock_google_cloud, "google.cloud.firestore": mock_firestore}):
+        with patch.dict(
+            sys.modules,
+            {
+                "google.cloud": mock_google_cloud,
+                "google.cloud.firestore": mock_firestore,
+            },
+        ):
             manager = JobManager(project_id="test-project")
             job = manager.create_job("handbook", "handbook_documents")
 
@@ -247,7 +259,13 @@ class TestJobManager:
         mock_google_cloud = MagicMock()
         mock_google_cloud.firestore = mock_firestore
 
-        with patch.dict(sys.modules, {"google.cloud": mock_google_cloud, "google.cloud.firestore": mock_firestore}):
+        with patch.dict(
+            sys.modules,
+            {
+                "google.cloud": mock_google_cloud,
+                "google.cloud.firestore": mock_firestore,
+            },
+        ):
             manager = JobManager(project_id="test-project")
             job = manager.get_job("test-job")
 
@@ -265,7 +283,13 @@ class TestJobManager:
         mock_google_cloud = MagicMock()
         mock_google_cloud.firestore = mock_firestore
 
-        with patch.dict(sys.modules, {"google.cloud": mock_google_cloud, "google.cloud.firestore": mock_firestore}):
+        with patch.dict(
+            sys.modules,
+            {
+                "google.cloud": mock_google_cloud,
+                "google.cloud.firestore": mock_firestore,
+            },
+        ):
             manager = JobManager(project_id="test-project")
             job = manager.get_job("nonexistent")
 
@@ -277,7 +301,13 @@ class TestJobManager:
         mock_google_cloud = MagicMock()
         mock_google_cloud.firestore = mock_firestore
 
-        with patch.dict(sys.modules, {"google.cloud": mock_google_cloud, "google.cloud.firestore": mock_firestore}):
+        with patch.dict(
+            sys.modules,
+            {
+                "google.cloud": mock_google_cloud,
+                "google.cloud.firestore": mock_firestore,
+            },
+        ):
             manager = JobManager(project_id="test-project")
             job = Job(
                 job_id="test-job",
@@ -297,7 +327,13 @@ class TestJobManager:
         mock_google_cloud = MagicMock()
         mock_google_cloud.firestore = mock_firestore
 
-        with patch.dict(sys.modules, {"google.cloud": mock_google_cloud, "google.cloud.firestore": mock_firestore}):
+        with patch.dict(
+            sys.modules,
+            {
+                "google.cloud": mock_google_cloud,
+                "google.cloud.firestore": mock_firestore,
+            },
+        ):
             manager = JobManager(project_id="test-project")
             job = Job(
                 job_id="test-job",
@@ -320,7 +356,13 @@ class TestJobManager:
         mock_google_cloud = MagicMock()
         mock_google_cloud.firestore = mock_firestore
 
-        with patch.dict(sys.modules, {"google.cloud": mock_google_cloud, "google.cloud.firestore": mock_firestore}):
+        with patch.dict(
+            sys.modules,
+            {
+                "google.cloud": mock_google_cloud,
+                "google.cloud.firestore": mock_firestore,
+            },
+        ):
             manager = JobManager(project_id="test-project")
             job = Job(
                 job_id="test-job",
@@ -367,7 +409,13 @@ class TestJobManager:
         mock_google_cloud = MagicMock()
         mock_google_cloud.firestore = mock_firestore
 
-        with patch.dict(sys.modules, {"google.cloud": mock_google_cloud, "google.cloud.firestore": mock_firestore}):
+        with patch.dict(
+            sys.modules,
+            {
+                "google.cloud": mock_google_cloud,
+                "google.cloud.firestore": mock_firestore,
+            },
+        ):
             manager = JobManager(project_id="test-project")
             jobs = manager.list_jobs()
 
@@ -387,7 +435,13 @@ class TestJobManager:
         mock_google_cloud = MagicMock()
         mock_google_cloud.firestore = mock_firestore
 
-        with patch.dict(sys.modules, {"google.cloud": mock_google_cloud, "google.cloud.firestore": mock_firestore}):
+        with patch.dict(
+            sys.modules,
+            {
+                "google.cloud": mock_google_cloud,
+                "google.cloud.firestore": mock_firestore,
+            },
+        ):
             manager = JobManager(project_id="test-project")
             jobs = manager.list_jobs(source="handbook", status=JobStatus.COMPLETED)
 

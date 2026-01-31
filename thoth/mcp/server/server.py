@@ -45,9 +45,11 @@ from starlette.routing import Route
 from starlette.types import Receive, Scope, Send
 
 from thoth.shared.sources.config import SourceRegistry
-from thoth.shared.utils.logger import setup_logger
+from thoth.shared.utils.logger import configure_root_logger, setup_logger
 from thoth.shared.vector_store import VectorStore
 
+# Configure root logger for structured JSON output in Cloud Run
+configure_root_logger()
 logger = setup_logger(__name__)
 
 # GCS prefix pattern for collection databases
@@ -156,7 +158,11 @@ class ThothMCPServer:
         # Setup MCP handlers first
         self._setup_handlers()
 
-        logger.info("Initialized %s v%s (vector stores will be loaded on first use)", name, version)
+        logger.info(
+            "Initialized %s v%s (vector stores will be loaded on first use)",
+            name,
+            version,
+        )
 
     def _ensure_vector_stores_loaded(self) -> None:
         """Ensure vector stores are loaded (lazy loading on first access).
@@ -216,12 +222,20 @@ class ThothMCPServer:
                 gcs_prefix = COLLECTION_GCS_PREFIX_PATTERN.format(collection_name=collection_name)
                 db_path = Path(self.base_db_path) / collection_name
 
-                logger.info("Initializing source '%s' (collection: %s)", source_name, collection_name)
+                logger.info(
+                    "Initializing source '%s' (collection: %s)",
+                    source_name,
+                    collection_name,
+                )
                 source_start = time.time()
 
                 if gcs_bucket and gcs_project:
                     # Cloud Run: Initialize VectorStore with GCS sync and restore
-                    logger.info("Initializing '%s' collection from GCS prefix '%s'", source_name, gcs_prefix)
+                    logger.info(
+                        "Initializing '%s' collection from GCS prefix '%s'",
+                        source_name,
+                        gcs_prefix,
+                    )
                     vector_store = VectorStore(
                         persist_directory=str(db_path),
                         collection_name=collection_name,
@@ -246,17 +260,29 @@ class ThothMCPServer:
                             self.vector_stores[source_name] = vector_store
                         else:
                             logger.warning(
-                                "No files restored for '%s' from GCS (%.2fs)", source_name, time.time() - source_start
+                                "No files restored for '%s' from GCS (%.2fs)",
+                                source_name,
+                                time.time() - source_start,
                             )
                     else:
-                        logger.info("Skipping GCS restoration for '%s' (SKIP_VECTOR_RESTORE=true)", source_name)
+                        logger.info(
+                            "Skipping GCS restoration for '%s' (SKIP_VECTOR_RESTORE=true)",
+                            source_name,
+                        )
                         # Check if local DB exists from previous run
                         if db_path.exists():
                             doc_count = vector_store.get_document_count()
-                            logger.info("Using existing local DB for '%s': %d documents", source_name, doc_count)
+                            logger.info(
+                                "Using existing local DB for '%s': %d documents",
+                                source_name,
+                                doc_count,
+                            )
                             self.vector_stores[source_name] = vector_store
                         else:
-                            logger.info("No local DB found for '%s', collection unavailable", source_name)
+                            logger.info(
+                                "No local DB found for '%s', collection unavailable",
+                                source_name,
+                            )
                 elif db_path.exists():
                     # Local: use existing database
                     vector_store = VectorStore(
@@ -273,7 +299,11 @@ class ThothMCPServer:
                     )
                     self.vector_stores[source_name] = vector_store
                 else:
-                    logger.info("Collection '%s' not found at %s (will be skipped)", source_name, db_path)
+                    logger.info(
+                        "Collection '%s' not found at %s (will be skipped)",
+                        source_name,
+                        db_path,
+                    )
 
             except (OSError, ValueError, RuntimeError):
                 logger.exception("Failed to initialize vector store for '%s'", source_name)
@@ -768,7 +798,13 @@ class ThothMCPServer:
         # Convert results to immutable tuples for caching
         if top_results:
             ids, documents, metadatas, distances = zip(*top_results, strict=True)
-            result = (tuple(ids), tuple(documents), tuple(metadatas), tuple(distances), search_time)
+            result = (
+                tuple(ids),
+                tuple(documents),
+                tuple(metadatas),
+                tuple(distances),
+                search_time,
+            )
         else:
             result = ((), (), (), (), search_time)
 

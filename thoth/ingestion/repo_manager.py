@@ -9,6 +9,8 @@ from typing import Any
 
 from git import GitCommandError, InvalidGitRepositoryError, Repo
 
+from thoth.shared.utils.logger import setup_logger
+
 # Constants
 DEFAULT_REPO_URL = "https://gitlab.com/gitlab-com/content-sites/handbook.git"
 DEFAULT_CLONE_PATH = Path.home() / ".thoth" / "handbook"
@@ -43,7 +45,7 @@ class HandbookRepoManager:
         self.repo_url = repo_url
         self.clone_path = clone_path or DEFAULT_CLONE_PATH
         self.metadata_path = self.clone_path.parent / METADATA_FILE
-        self.logger = logger or logging.getLogger(__name__)
+        self.logger = logger or setup_logger(__name__)
 
     def is_valid_repo(self) -> bool:
         """Check if clone_path contains a valid git repository.

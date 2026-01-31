@@ -7,7 +7,6 @@ job status monitoring.
 
 from collections.abc import Callable
 from datetime import datetime, timezone
-import logging
 from typing import Any
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -15,10 +14,10 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from thoth.ingestion.pipeline import IngestionPipeline
-from thoth.shared.utils.logger import setup_logger
+from thoth.shared.utils.logger import logging, setup_logger
 
 __all__ = ["SyncScheduler"]
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 class SyncScheduler:

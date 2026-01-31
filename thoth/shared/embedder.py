@@ -4,13 +4,14 @@ This module provides the Embedder class for generating embeddings from text chun
 using sentence-transformers models with batch processing support.
 """
 
-import logging
 import os
 from typing import Any
 
 from sentence_transformers import SentenceTransformer
 
-logger = logging.getLogger(__name__)
+from thoth.shared.utils.logger import setup_logger
+
+logger = setup_logger(__name__)
 
 
 class Embedder:
