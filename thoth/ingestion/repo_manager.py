@@ -5,11 +5,85 @@ import logging
 from pathlib import Path
 import shutil
 import time
-from typing import Any
+from typing import Any, ClassVar
 
 from git import GitCommandError, InvalidGitRepositoryError, Repo
+from git.remote import RemoteProgress
 
 from thoth.shared.utils.logger import setup_logger
+
+
+class CloneProgress(RemoteProgress):
+    """Progress handler for git clone operations.
+
+    Logs progress updates during clone/fetch operations to provide visibility
+    into long-running git operations.
+    """
+
+    # Operation codes from RemoteProgress
+    OP_NAMES: ClassVar[dict[int, str]] = {
+        RemoteProgress.COUNTING: "Counting objects",
+        RemoteProgress.COMPRESSING: "Compressing objects",
+        RemoteProgress.WRITING: "Writing objects",
+        RemoteProgress.RECEIVING: "Receiving objects",
+        RemoteProgress.RESOLVING: "Resolving deltas",
+        RemoteProgress.FINDING_SOURCES: "Finding sources",
+        RemoteProgress.CHECKING_OUT: "Checking out files",
+    }
+
+    def __init__(self, logger: logging.Logger | logging.LoggerAdapter) -> None:
+        """Initialize the progress handler.
+
+        Args:
+            logger: Logger instance for progress messages
+        """
+        super().__init__()
+        self.logger = logger
+        self._last_logged_percent: int = -1
+        self._current_op: int = 0
+
+    def update(
+        self,
+        op_code: int,
+        cur_count: str | float,
+        max_count: str | float | None = None,
+        message: str = "",
+    ) -> None:
+        """Called for each progress update from git.
+
+        Args:
+            op_code: Operation code indicating the current stage
+            cur_count: Current progress count
+            max_count: Maximum count (if known)
+            message: Optional message from git
+        """
+        # Extract the operation type (remove BEGIN/END flags)
+        op_type = op_code & self.OP_MASK
+
+        # Get human-readable operation name
+        op_name = self.OP_NAMES.get(op_type, f"Operation {op_type}")
+
+        # Calculate percentage if max_count is available
+        if max_count and float(max_count) > 0:
+            percent = int((float(cur_count) / float(max_count)) * 100)
+
+            # Log at 0%, 25%, 50%, 75%, 100% to avoid spam
+            if percent >= self._last_logged_percent + 25 or (op_type != self._current_op and percent > 0):
+                self._last_logged_percent = percent
+                self._current_op = op_type
+                self.logger.info(
+                    "%s: %d%% (%d/%d)%s",
+                    op_name,
+                    percent,
+                    int(float(cur_count)),
+                    int(float(max_count)),
+                    f" - {message}" if message else "",
+                )
+        elif op_code & self.BEGIN:
+            # Log when a new operation begins
+            self._last_logged_percent = -1
+            self.logger.info("%s started%s", op_name, f": {message}" if message else "")
+
 
 # Constants
 DEFAULT_REPO_URL = "https://gitlab.com/gitlab-com/content-sites/handbook.git"
@@ -33,7 +107,7 @@ class HandbookRepoManager:
         self,
         repo_url: str = DEFAULT_REPO_URL,
         clone_path: Path | None = None,
-        logger: logging.Logger | None = None,
+        logger: logging.Logger | logging.LoggerAdapter | None = None,
     ):
         """Initialize the repository manager.
 
@@ -45,7 +119,7 @@ class HandbookRepoManager:
         self.repo_url = repo_url
         self.clone_path = clone_path or DEFAULT_CLONE_PATH
         self.metadata_path = self.clone_path.parent / METADATA_FILE
-        self.logger = logger or setup_logger(__name__)
+        self.logger: logging.Logger | logging.LoggerAdapter = logger or setup_logger(__name__)
 
     def is_valid_repo(self) -> bool:
         """Check if clone_path contains a valid git repository.
@@ -68,6 +142,7 @@ class HandbookRepoManager:
         force: bool = False,
         max_retries: int = 3,
         retry_delay: int = 5,
+        shallow: bool = True,
     ) -> Path:
         """Clone the GitLab handbook repository.
 
@@ -75,6 +150,9 @@ class HandbookRepoManager:
             force: If True, remove existing repository and re-clone
             max_retries: Maximum number of clone attempts
             retry_delay: Delay in seconds between retries
+            shallow: If True, perform shallow clone (depth=1) for faster cloning.
+                    Shallow clones only fetch the latest commit, significantly
+                    reducing clone time for large repositories.
 
         Returns:
             Path to the cloned repository
@@ -95,14 +173,20 @@ class HandbookRepoManager:
 
         self.clone_path.parent.mkdir(parents=True, exist_ok=True)
 
-        return self._clone_with_retry(max_retries, retry_delay)
+        return self._clone_with_retry(max_retries, retry_delay, shallow=shallow)
 
-    def _clone_with_retry(self, max_retries: int, retry_delay: int) -> Path:
+    def _clone_with_retry(
+        self,
+        max_retries: int,
+        retry_delay: int,
+        shallow: bool = True,
+    ) -> Path:
         """Clone repository with retry logic.
 
         Args:
             max_retries: Maximum number of attempts
             retry_delay: Delay in seconds between attempts
+            shallow: If True, perform a shallow clone (depth=1) for faster cloning
 
         Returns:
             Path to cloned repository
@@ -111,11 +195,29 @@ class HandbookRepoManager:
             GitCommandError: If all attempts fail
         """
         last_error = None
+        progress = CloneProgress(self.logger)
 
         for attempt in range(1, max_retries + 1):
             try:
-                self.logger.info("Cloning repository (attempt %d/%d)...", attempt, max_retries)
-                Repo.clone_from(self.repo_url, str(self.clone_path))
+                clone_type = "shallow" if shallow else "full"
+                self.logger.info(
+                    "Cloning repository (attempt %d/%d, %s clone)...",
+                    attempt,
+                    max_retries,
+                    clone_type,
+                )
+
+                # Build clone options
+                clone_kwargs: dict[str, Any] = {
+                    "progress": progress,
+                }
+
+                if shallow:
+                    # Shallow clone: only get the latest commit
+                    clone_kwargs["depth"] = 1
+                    clone_kwargs["single_branch"] = True
+
+                Repo.clone_from(self.repo_url, str(self.clone_path), **clone_kwargs)
                 self.logger.info("Successfully cloned repository to %s", self.clone_path)
                 return self.clone_path
             except GitCommandError as e:
@@ -124,6 +226,9 @@ class HandbookRepoManager:
                 if attempt < max_retries:
                     self.logger.info("Retrying in %d seconds...", retry_delay)
                     time.sleep(retry_delay)
+                    # Clean up failed clone attempt
+                    if self.clone_path.exists():
+                        shutil.rmtree(self.clone_path)
 
         msg = MSG_CLONE_FAILED.format(attempts=max_retries)
         self.logger.exception("All clone attempts failed")
@@ -131,6 +236,9 @@ class HandbookRepoManager:
 
     def update_repository(self) -> bool:
         """Update the repository by pulling latest changes.
+
+        For shallow clones, this fetches only the latest changes while
+        maintaining the shallow history.
 
         Returns:
             True if update successful, False otherwise
@@ -146,7 +254,8 @@ class HandbookRepoManager:
             repo = Repo(str(self.clone_path))
             self.logger.info("Pulling latest changes from %s", self.repo_url)
             origin = repo.remotes.origin
-            origin.pull()
+            progress = CloneProgress(self.logger)
+            origin.pull(progress=progress)
             self.logger.info("Successfully updated repository")
             return True
         except (GitCommandError, InvalidGitRepositoryError):
@@ -222,6 +331,10 @@ class HandbookRepoManager:
     def get_changed_files(self, since_commit: str) -> list[str] | None:
         """Get list of files changed since a specific commit.
 
+        Note: For shallow clones, this may fail if the comparison commit
+        is not in the shallow history. In this case, None is returned
+        and callers should fall back to full processing.
+
         Args:
             since_commit: Commit SHA to compare against
 
@@ -250,12 +363,27 @@ class HandbookRepoManager:
                 since_commit,
             )
             return changed_files
-        except (GitCommandError, InvalidGitRepositoryError):
+        except GitCommandError as e:
+            if "unknown revision" in str(e).lower() or "bad object" in str(e).lower():
+                self.logger.warning(
+                    "Cannot diff against commit %s (likely shallow clone). Falling back to full processing.",
+                    since_commit,
+                )
+            else:
+                self.logger.exception(MSG_DIFF_FAILED)
+            return None
+        except InvalidGitRepositoryError:
             self.logger.exception(MSG_DIFF_FAILED)
             return None
 
-    def get_file_changes(self, since_commit: str) -> dict[str, list[str]] | None:
+    def get_file_changes(  # noqa: PLR0912
+        self, since_commit: str
+    ) -> dict[str, list[str]] | None:
         """Get categorized file changes since a specific commit.
+
+        Note: For shallow clones, this may fail if the comparison commit
+        is not in the shallow history. In this case, None is returned
+        and callers should fall back to full processing.
 
         Args:
             since_commit: Commit SHA to compare against
@@ -323,7 +451,16 @@ class HandbookRepoManager:
                 "modified": modified_files,
                 "deleted": deleted_files,
             }
-        except (GitCommandError, InvalidGitRepositoryError):
+        except GitCommandError as e:
+            if "unknown revision" in str(e).lower() or "bad object" in str(e).lower():
+                self.logger.warning(
+                    "Cannot diff against commit %s (likely shallow clone). Falling back to full processing.",
+                    since_commit,
+                )
+            else:
+                self.logger.exception(MSG_DIFF_FAILED)
+            return None
+        except InvalidGitRepositoryError:
             self.logger.exception(MSG_DIFF_FAILED)
             return None
 

@@ -124,7 +124,7 @@ class MarkdownChunker:
         min_chunk_size: int = DEFAULT_MIN_CHUNK_SIZE,
         max_chunk_size: int = DEFAULT_MAX_CHUNK_SIZE,
         overlap_size: int = DEFAULT_OVERLAP_SIZE,
-        logger: logging.Logger | None = None,
+        logger: logging.Logger | logging.LoggerAdapter | None = None,
     ):
         """Initialize the markdown chunker.
 
@@ -181,6 +181,7 @@ class MarkdownChunker:
         Returns:
             List of chunks with metadata
         """
+        self.logger.debug(f"Chunking text from {source_path} ({len(text)} chars)")
         if not text.strip():
             return []
 
@@ -193,6 +194,7 @@ class MarkdownChunker:
         # Create chunks with metadata
         chunks = self._create_chunks(chunk_groups, source_path)
 
+        self.logger.debug(f"Created {len(chunks)} chunks for {source_path}")
         # Add overlaps
         return self._add_overlaps(chunks)
 
@@ -518,7 +520,7 @@ class DocumentChunker:
         min_chunk_size: int = DEFAULT_MIN_CHUNK_SIZE,
         max_chunk_size: int = DEFAULT_MAX_CHUNK_SIZE,
         overlap_size: int = DEFAULT_OVERLAP_SIZE,
-        logger: logging.Logger | None = None,
+        logger: logging.Logger | logging.LoggerAdapter | None = None,
     ):
         """Initialize the document chunker.
 
@@ -559,6 +561,7 @@ class DocumentChunker:
         Returns:
             List of chunks with metadata including source and format
         """
+        self.logger.debug(f"Chunking document {source_path} (format: {doc_format}, length: {len(content)})")
         if not content.strip():
             return []
 
@@ -574,6 +577,7 @@ class DocumentChunker:
             chunk.metadata.source = source
             chunk.metadata.format = doc_format
 
+        self.logger.debug(f"Created {len(chunks)} chunks for {source_path}")
         return chunks
 
     def chunk_file(self, file_path: Path, source: str = "", doc_format: str = "markdown") -> list[Chunk]:

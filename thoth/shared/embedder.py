@@ -4,6 +4,7 @@ This module provides the Embedder class for generating embeddings from text chun
 using sentence-transformers models with batch processing support.
 """
 
+import logging
 import os
 from typing import Any
 
@@ -25,6 +26,7 @@ class Embedder:
         model_name: str = "all-MiniLM-L6-v2",
         device: str | None = None,
         batch_size: int = 32,
+        logger_instance: logging.Logger | logging.LoggerAdapter | None = None,
     ):
         """Initialize the Embedder with a sentence-transformers model.
 
@@ -34,18 +36,20 @@ class Embedder:
                 Other options: 'all-mpnet-base-v2' (higher quality, slower).
             device: Device to use for inference ('cuda', 'cpu', or None for auto-detect).
             batch_size: Number of texts to process in each batch (default: 32).
+            logger_instance: Optional logger instance to use.
         """
         self.model_name = model_name
         self.batch_size = batch_size
+        self.logger = logger_instance or logger
 
         # Set HuggingFace token if available (for downloading models)
         hf_token = os.getenv("HF_TOKEN")
         if hf_token:
             os.environ["HUGGING_FACE_HUB_TOKEN"] = hf_token
 
-        logger.info(f"Loading embedding model: {model_name}")
+        self.logger.info(f"Loading embedding model: {model_name}")
         self.model = SentenceTransformer(model_name, device=device)
-        logger.info(f"Model loaded successfully on device: {self.model.device}")
+        self.logger.info(f"Model loaded successfully on device: {self.model.device}")
 
     def embed(
         self,
@@ -78,7 +82,7 @@ class Embedder:
                 f"invalid entries at indices: {invalid_indices}"
             )
             raise ValueError(msg)
-        logger.info(f"Generating embeddings for {len(texts)} texts with batch_size={self.batch_size}")
+        self.logger.info(f"Generating embeddings for {len(texts)} texts with batch_size={self.batch_size}")
 
         # Generate embeddings with batch processing
         embeddings = self.model.encode(
@@ -92,7 +96,7 @@ class Embedder:
         # Convert numpy arrays to lists for JSON serialization
         embeddings_list: list[list[float]] = embeddings.tolist()
 
-        logger.info(f"Generated {len(embeddings_list)} embeddings of dimension {len(embeddings_list[0])}")
+        self.logger.info(f"Generated {len(embeddings_list)} embeddings of dimension {len(embeddings_list[0])}")
 
         return embeddings_list
 

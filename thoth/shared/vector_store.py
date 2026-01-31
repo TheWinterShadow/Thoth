@@ -5,6 +5,7 @@ document embeddings with CRUD operations and optional GCS backup.
 """
 
 import importlib.util
+import logging
 from pathlib import Path
 from typing import Any, cast
 
@@ -31,6 +32,7 @@ class VectorStore:
         embedder: Embedder | None = None,
         gcs_bucket_name: str | None = None,
         gcs_project_id: str | None = None,
+        logger_instance: logging.Logger | logging.LoggerAdapter | None = None,
     ):
         """Initialize the ChromaDB vector store.
 
@@ -41,12 +43,14 @@ class VectorStore:
                 If not provided, a default Embedder with all-MiniLM-L6-v2 will be created.
             gcs_bucket_name: Optional GCS bucket name for cloud backup
             gcs_project_id: Optional GCP project ID for GCS
+            logger_instance: Optional logger instance to use.
         """
         self.persist_directory = Path(persist_directory)
         self.collection_name = collection_name
+        self.logger = logger_instance or logger
 
         # Initialize or use provided embedder
-        self.embedder = embedder or Embedder(model_name="all-MiniLM-L6-v2")
+        self.embedder = embedder or Embedder(model_name="all-MiniLM-L6-v2", logger_instance=self.logger)
 
         # Create persist directory if it doesn't exist
         self.persist_directory.mkdir(parents=True, exist_ok=True)
@@ -73,17 +77,18 @@ class VectorStore:
                     self.gcs_sync = GCSSync(
                         bucket_name=gcs_bucket_name,
                         project_id=gcs_project_id,
+                        logger_instance=self.logger,
                     )
-                    logger.info(f"GCS sync enabled with bucket: {gcs_bucket_name}")
+                    self.logger.info(f"GCS sync enabled with bucket: {gcs_bucket_name}")
                 except ImportError as e:
-                    logger.warning(f"Failed to initialize GCS sync: {e}")
+                    self.logger.warning(f"Failed to initialize GCS sync: {e}")
                     self.gcs_sync = None
             else:
-                logger.warning("google-cloud-storage not installed, GCS sync disabled")
+                self.logger.warning("google-cloud-storage not installed, GCS sync disabled")
                 self.gcs_sync = None
 
-        logger.info(f"Initialized VectorStore with collection '{collection_name}' at '{persist_directory}'")
-        logger.info(f"Using embedder: {self.embedder.model_name}")
+        self.logger.info(f"Initialized VectorStore with collection '{collection_name}' at '{persist_directory}'")
+        self.logger.info(f"Using embedder: {self.embedder.model_name}")
 
     def add_documents(
         self,
@@ -106,7 +111,7 @@ class VectorStore:
             ValueError: If list lengths don't match
         """
         if not documents:
-            logger.warning("No documents provided to add_documents")
+            self.logger.warning("No documents provided to add_documents")
             return
 
         # Validate input lengths
@@ -129,7 +134,7 @@ class VectorStore:
 
         # Generate embeddings if not provided
         if embeddings is None:
-            logger.info(f"Generating embeddings for {len(documents)} documents")
+            self.logger.info(f"Generating embeddings for {len(documents)} documents")
             embeddings = self.embedder.embed(documents, show_progress=True)
 
         # Upsert documents to collection (add or update if ID exists)
@@ -140,7 +145,7 @@ class VectorStore:
             embeddings=cast("Any", embeddings),
         )
 
-        logger.info(f"Upserted {len(documents)} documents to collection")
+        self.logger.info(f"Upserted {len(documents)} documents to collection")
 
     def search_similar(
         self,
@@ -187,7 +192,7 @@ class VectorStore:
         }
 
         result_count = len(cast("list", flattened_results["ids"]))
-        logger.info(f"Search returned {result_count} results for query: '{query[:50]}...'")
+        self.logger.info(f"Search returned {result_count} results for query: '{query[:50]}...'")
 
         return flattened_results
 
@@ -208,7 +213,7 @@ class VectorStore:
         self.collection.delete(ids=ids, where=where)
 
         delete_desc = f"ids={ids}" if ids else f"where={where}"
-        logger.info(f"Deleted documents matching {delete_desc}")
+        self.logger.info(f"Deleted documents matching {delete_desc}")
 
     def delete_by_file_path(self, file_path: str) -> int:
         """Delete all documents associated with a specific file path.
@@ -228,17 +233,17 @@ class VectorStore:
             count = len(existing["ids"])
 
             if count == 0:
-                logger.info(f"No documents found for file path: {file_path}")
+                self.logger.info(f"No documents found for file path: {file_path}")
                 return 0
 
             # Delete all documents with matching file_path
             self.collection.delete(where={"file_path": file_path})
 
-            logger.info(f"Deleted {count} documents for file path: {file_path}")
+            self.logger.info(f"Deleted {count} documents for file path: {file_path}")
             return count
 
         except Exception:
-            logger.exception(f"Failed to delete documents for file path: {file_path}")
+            self.logger.exception(f"Failed to delete documents for file path: {file_path}")
             raise
 
     def get_document_count(self) -> int:
@@ -270,7 +275,7 @@ class VectorStore:
         """
         results = self.collection.get(ids=ids, where=where, limit=limit)
 
-        logger.info(f"Retrieved {len(results['ids'])} documents")
+        self.logger.info(f"Retrieved {len(results['ids'])} documents")
 
         return dict(results)
 
@@ -283,7 +288,7 @@ class VectorStore:
         self.collection = self.client.get_or_create_collection(
             name=self.collection_name, metadata={"hnsw:space": "cosine"}
         )
-        logger.warning(f"Reset collection '{self.collection_name}'")
+        self.logger.warning(f"Reset collection '{self.collection_name}'")
 
     def backup_to_gcs(self, backup_name: str | None = None) -> str | None:
         """Backup vector store to Google Cloud Storage.
@@ -298,15 +303,15 @@ class VectorStore:
             Exception: If backup fails
         """
         if not self.gcs_sync:
-            logger.warning("GCS sync not configured. Cannot backup to GCS.")
+            self.logger.warning("GCS sync not configured. Cannot backup to GCS.")
             return None
 
         try:
             prefix = self.gcs_sync.backup_to_gcs(self.persist_directory, backup_name=backup_name)
-            logger.info(f"Successfully backed up to GCS: {prefix}")
+            self.logger.info(f"Successfully backed up to GCS: {prefix}")
             return prefix
         except Exception:
-            logger.exception("Failed to backup to GCS")
+            self.logger.exception("Failed to backup to GCS")
             raise
 
     def restore_from_gcs(
@@ -328,7 +333,7 @@ class VectorStore:
             Exception: If restore fails
         """
         if not self.gcs_sync:
-            logger.warning("GCS sync not configured. Cannot restore from GCS.")
+            self.logger.warning("GCS sync not configured. Cannot restore from GCS.")
             return 0
 
         try:
@@ -342,7 +347,7 @@ class VectorStore:
                 msg = "Must provide either backup_name or gcs_prefix"
                 raise ValueError(msg)
 
-            logger.info(f"Successfully restored {count} files from GCS")
+            self.logger.info(f"Successfully restored {count} files from GCS")
 
             # Reinitialize ChromaDB client after restore
             self.client = chromadb.PersistentClient(
@@ -355,7 +360,7 @@ class VectorStore:
 
             return count
         except Exception:
-            logger.exception("Failed to restore from GCS")
+            self.logger.exception("Failed to restore from GCS")
             raise
 
     def sync_to_gcs(self, gcs_prefix: str = "chroma_db") -> dict | None:
@@ -371,15 +376,15 @@ class VectorStore:
             Exception: If sync fails
         """
         if not self.gcs_sync:
-            logger.warning("GCS sync not configured. Cannot sync to GCS.")
+            self.logger.warning("GCS sync not configured. Cannot sync to GCS.")
             return None
 
         try:
             result = self.gcs_sync.sync_to_gcs(self.persist_directory, gcs_prefix=gcs_prefix)
-            logger.info(f"Successfully synced to GCS: {result}")
+            self.logger.info(f"Successfully synced to GCS: {result}")
             return result
         except Exception:
-            logger.exception("Failed to sync to GCS")
+            self.logger.exception("Failed to sync to GCS")
             raise
 
     def list_gcs_backups(self) -> list[str]:
@@ -392,13 +397,13 @@ class VectorStore:
             Exception: If listing fails
         """
         if not self.gcs_sync:
-            logger.warning("GCS sync not configured.")
+            self.logger.warning("GCS sync not configured.")
             return []
 
         try:
             backups = self.gcs_sync.list_backups()
-            logger.info(f"Found {len(backups)} backups in GCS")
+            self.logger.info(f"Found {len(backups)} backups in GCS")
             return backups
         except Exception:
-            logger.exception("Failed to list GCS backups")
+            self.logger.exception("Failed to list GCS backups")
             raise
