@@ -54,6 +54,26 @@ resource "google_firestore_index" "jobs_by_status_and_time" {
   depends_on = [google_firestore_database.thoth_jobs]
 }
 
+# Index for querying sub-jobs by parent job
+# Used by get_sub_jobs() to find all batch jobs for a parent job
+resource "google_firestore_index" "sub_jobs_by_parent" {
+  project    = var.project_id
+  database   = google_firestore_database.thoth_jobs.name
+  collection = "thoth_jobs"
+
+  fields {
+    field_path = "parent_job_id"
+    order      = "ASCENDING"
+  }
+
+  fields {
+    field_path = "batch_index"
+    order      = "ASCENDING"
+  }
+
+  depends_on = [google_firestore_database.thoth_jobs]
+}
+
 # Output Firestore database information
 output "firestore_database_name" {
   description = "Name of the Firestore database"
