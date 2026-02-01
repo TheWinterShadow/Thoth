@@ -443,6 +443,16 @@ exclude = [
     "ARG",    # Unused function args are OK in tests
     "SLF001", # Private member access is OK in tests (testing private methods)
 ]
+"scripts/**/*" = [
+    "T201",  # Allow print statements in scripts
+    "BLE001", # Allow blind excepts in scripts
+    "N806",  # Allow non-conforming function names in scripts
+    "F841",  # Allow unused variables in scripts
+    "PLR0915", # Allow complex functions in scripts
+    "D103",  # Allow missing docstrings in scripts
+    "PLR0912", # Allow complex methods in scripts
+    "PLR0911", # Allow too many branches in scripts
+]
 
 [tool.ruff.lint.pydocstyle]
 # Use Google-style docstrings

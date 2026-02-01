@@ -182,7 +182,15 @@ class VectorStore:
             self.table = self.db.open_table(self.collection_name)
         else:
             schema = _document_schema(self._vector_dim)
-            self.table = self.db.create_table(self.collection_name, schema=schema, mode="create")
+            try:
+                self.table = self.db.create_table(self.collection_name, schema=schema, mode="create")
+            except ValueError as e:
+                # Handle GCS eventual consistency: table may exist but not appear in list_tables()
+                if "already exists" in str(e):
+                    self.logger.info("Table '%s' already exists, opening it", self.collection_name)
+                    self.table = self.db.open_table(self.collection_name)
+                else:
+                    raise
         self.logger.info(
             "Initialized VectorStore with table '%s' at '%s'",
             collection_name,

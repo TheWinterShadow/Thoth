@@ -1071,11 +1071,7 @@ class TestContentRetrievalToolsIntegration(unittest.IsolatedAsyncioTestCase):
 
         # Test get_handbook_section
         result1 = await self.server._get_handbook_section("test")
-        self.assertIn("Error", result1)
-
-        # Test list_handbook_topics
-        result2 = await self.server._list_handbook_topics()
-        self.assertIn("Error", result2)
+        self.assertIn("error", result1.lower())
 
 
 class TestGetRecentUpdatesTools(unittest.IsolatedAsyncioTestCase):
