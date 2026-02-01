@@ -15,6 +15,7 @@ import os
 from typing import Any
 import uuid
 
+from google.cloud import storage  # type: ignore[attr-defined]
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -582,7 +583,44 @@ async def process_batch(request: Request) -> JSONResponse:  # noqa: PLR0912, PLR
         gcs_bucket = os.getenv("GCS_BUCKET_NAME")
         gcs_project = os.getenv("GCP_PROJECT_ID")
         batch_gcs_prefix = f"{BATCH_PREFIX_PATTERN}{collection_name}_{batch_id}"
+
+        # Idempotency check: skip if batch already exists (duplicate run/retry)
         if gcs_bucket and gcs_project:
+            storage_client = storage.Client(project=gcs_project)
+            bucket = storage_client.bucket(gcs_bucket)
+
+            # Check if batch LanceDB already exists
+            existing_blobs = list(bucket.list_blobs(prefix=f"{batch_gcs_prefix}/", max_results=1))
+            if existing_blobs:
+                batch_logger.info(
+                    "Batch already exists, skipping processing (idempotent)",
+                    extra={"gcs_prefix": batch_gcs_prefix},
+                )
+
+                # Mark sub-job as completed if it exists
+                if sub_job:
+                    job_manager = get_job_manager()
+                    # Use approximate stats since we're skipping
+                    batch_stats = JobStats(
+                        total_files=file_count,
+                        processed_files=file_count,
+                        failed_files=0,
+                        total_chunks=file_count,
+                        total_documents=file_count,
+                    )
+                    job_manager.mark_sub_job_completed(sub_job, batch_stats)
+
+                return JSONResponse(
+                    {
+                        "status": "success",
+                        "batch_id": batch_id,
+                        "job_id": job_id,
+                        "message": "Batch already processed (duplicate run)",
+                        "gcs_prefix": batch_gcs_prefix,
+                        "skipped": True,
+                    }
+                )
+
             batch_store = VectorStore(
                 collection_name=collection_name,
                 gcs_bucket_name=gcs_bucket,
