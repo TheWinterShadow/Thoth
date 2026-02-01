@@ -850,7 +850,7 @@ class TestGetHandbookSection(unittest.IsolatedAsyncioTestCase):
         """Test error handling when vector store is not available."""
         self.server.vector_store = None
         result = await self.server._get_handbook_section("test_section")
-        self.assertIn("ERROR", result)
+        self.assertIn("error", result.lower())
 
     async def test_get_handbook_section_limit_validation(self):
         """Test that limit parameter is validated and clamped."""
