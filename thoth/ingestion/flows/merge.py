@@ -49,11 +49,17 @@ async def _process_single_batch(
     def merge_batch() -> int:
         """Run in executor: connect to batch LanceDB on GCS and add rows to main store."""
         db = lancedb.connect(batch_uri)
-        if collection_name not in list(db.list_tables()):
-            logger.warning("Batch %s has no table %s", batch_prefix_name, collection_name)
-            return 0
+        # Try to open table directly instead of using list_tables()
+        # which can return stale results on GCS due to eventual consistency
+        try:
+            table = db.open_table(collection_name)
+        except (ValueError, FileNotFoundError) as e:
+            # Table doesn't exist in this batch
+            if "does not exist" in str(e) or "not found" in str(e).lower():
+                logger.warning("Batch %s has no table %s", batch_prefix_name, collection_name)
+                return 0
+            raise
 
-        table = db.open_table(collection_name)
         tbl = table.to_arrow()
 
         if tbl.num_rows == 0:
@@ -151,13 +157,17 @@ async def merge_batches(request: Request) -> JSONResponse:
 
         logger.info("Found %d batches to merge", len(batch_prefixes))
 
-        # Create main VectorStore
-        main_store = VectorStore(
-            persist_directory="/tmp/lancedb",  # nosec B108 - unused when GCS set
-            collection_name=collection_name,
-            gcs_bucket_name=gcs_bucket,
-            gcs_project_id=gcs_project,
-        )
+        # Create main VectorStore in executor to avoid blocking event loop
+        def create_store() -> VectorStore:
+            return VectorStore(
+                persist_directory="/tmp/lancedb",  # nosec B108 - unused when GCS set
+                collection_name=collection_name,
+                gcs_bucket_name=gcs_bucket,
+                gcs_project_id=gcs_project,
+            )
+
+        loop = asyncio.get_event_loop()
+        main_store = await loop.run_in_executor(None, create_store)
 
         # Merge each batch sequentially
         total_documents = 0
@@ -171,8 +181,13 @@ async def merge_batches(request: Request) -> JSONResponse:
             except (ValueError, KeyError, RuntimeError, OSError):
                 continue
 
-        # Cleanup batches if requested
-        deleted_batches = [b for b in merged_batches if _cleanup_batch_from_gcs(b, gcs_sync)] if cleanup else []
+        # Cleanup batches if requested (run in executor to avoid blocking)
+        deleted_batches = []
+        if cleanup:
+            for b in merged_batches:
+                deleted = await loop.run_in_executor(None, _cleanup_batch_from_gcs, b, gcs_sync)
+                if deleted:
+                    deleted_batches.append(b)
 
         return JSONResponse(
             {
