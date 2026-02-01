@@ -27,11 +27,13 @@ resource "google_cloud_run_v2_service" "thoth_ingestion_worker" {
 
       resources {
         limits = {
-          cpu    = "1"
-          memory = "2Gi"
+          cpu    = "2"
+          memory = "4Gi"
         }
-        cpu_idle          = true
-        startup_cpu_boost = false
+        # Disable CPU throttling - batch processing needs consistent CPU
+        # to prevent health check timeouts during embedding work
+        cpu_idle          = false
+        startup_cpu_boost = true
       }
 
       # Environment variables for ingestion worker
@@ -102,12 +104,12 @@ resource "google_cloud_run_v2_service" "thoth_ingestion_worker" {
         }
       }
 
-      # Startup probe
+      # Startup probe - allow time for model loading
       startup_probe {
-        initial_delay_seconds = 30
+        initial_delay_seconds = 60
         timeout_seconds       = 10
         period_seconds        = 15
-        failure_threshold     = 8
+        failure_threshold     = 10
 
         http_get {
           path = "/health"
@@ -115,11 +117,12 @@ resource "google_cloud_run_v2_service" "thoth_ingestion_worker" {
         }
       }
 
-      # Liveness probe
+      # Liveness probe - relaxed timeouts for batch processing workloads
+      # The embedding model can cause brief CPU spikes that block health checks
       liveness_probe {
-        initial_delay_seconds = 30
-        timeout_seconds       = 3
-        period_seconds        = 10
+        initial_delay_seconds = 60
+        timeout_seconds       = 10
+        period_seconds        = 30
         failure_threshold     = 3
 
         http_get {
