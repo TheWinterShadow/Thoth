@@ -6,7 +6,7 @@ job status monitoring.
 """
 
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -201,7 +201,7 @@ class SyncScheduler:
             Dictionary containing sync statistics
         """
         self.logger.info("Starting scheduled sync operation")
-        start_time = datetime.now(timezone.utc)
+        start_time = datetime.now(UTC)
 
         try:
             # Run the pipeline in incremental mode
@@ -214,7 +214,7 @@ class SyncScheduler:
             stats_dict = {
                 "success": True,
                 "start_time": start_time.isoformat(),
-                "end_time": datetime.now(timezone.utc).isoformat(),
+                "end_time": datetime.now(UTC).isoformat(),
                 "processed_files": stats.processed_files,
                 "failed_files": stats.failed_files,
                 "total_chunks": stats.total_chunks,

@@ -49,24 +49,35 @@ hatch run build              # Build wheel and sdist packages
 **Ingestion Pipeline** (`thoth/ingestion/`):
 - `pipeline.py` - Orchestrates end-to-end ingestion flow
 - `repo_manager.py` - Git repository management (clone/pull)
+- `gcs_repo_sync.py` - GCS file listing and parallel batch downloads
 - `chunker.py` - Document chunking (500-1000 tokens with overlap)
 - `parsers/` - Multi-format support (markdown, PDF, DOCX, text)
-- `worker.py` - Cloud Tasks parallel batch processing
+- `worker.py` - HTTP server with singleton management (116 lines)
+- `flows/` - Modular workflow endpoints (health, clone, ingest, batch, merge, job_status)
+- `job_manager.py` - Firestore job tracking with sub-job aggregation
+- `task_queue.py` - Cloud Tasks client for parallel batch distribution
 
 **MCP Server** (`thoth/mcp/`):
 - `server/server.py` - ThothMCPServer with semantic search tools
 - `http_wrapper.py` - SSE transport wrapper for Cloud Run (Uvicorn/Starlette)
 
 **Shared Utilities** (`thoth/shared/`):
-- `vector_store.py` - LanceDB wrapper with native GCS support
-- `embedder.py` - sentence-transformers embedding generation
+- `vector_store.py` - LanceDB wrapper with native GCS support (gs:// URIs)
+- `embedder.py` - sentence-transformers embedding generation (all-MiniLM-L6-v2)
 - `cli.py` - Click-based CLI (`thoth` command)
 - `sources/config.py` - Multi-source registry (handbook, dnd, personal collections)
+- `gcs_sync.py` - GCS bucket sync utilities
+- `health.py` - Health check endpoints
+- `monitoring.py` - Metrics and observability
 
 ### Data Flow
 
-1. **Ingestion**: GitLab repo → Parser → Chunker (500-1000 tokens) → Embedder → LanceDB (local or gs://) → GCS when using cloud
-2. **Query**: MCP request → LRU cache check → Query embedding → Vector similarity search → Results
+1. **Ingestion (Parallel)**:
+   - `/ingest` → List files from GCS → Create sub-jobs → Enqueue batches to Cloud Tasks
+   - Cloud Tasks → `/ingest-batch` (parallel) → Download batch files → Parse → Chunk → Embed → Write to isolated LanceDB table (gs://bucket/lancedb_batch_X/)
+   - `/merge-batches` → Read all batch tables → Merge into main LanceDB (gs://bucket/lancedb/) → Cleanup batches
+2. **Ingestion (Local)**: GitLab repo → Parser → Chunker (500-1000 tokens) → Embedder → LanceDB (local or gs://)
+3. **Query**: MCP request → LRU cache check → Query embedding → LanceDB similarity search → Results
 
 ### Entry Points
 

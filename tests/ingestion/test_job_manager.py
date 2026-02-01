@@ -1,6 +1,6 @@
 """Tests for job manager module."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -109,7 +109,7 @@ class TestJob:
 
     def test_job_creation(self):
         """Test creating a Job."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         job = Job(
             job_id="test-123",
             status=JobStatus.PENDING,
@@ -128,7 +128,7 @@ class TestJob:
 
     def test_job_to_dict(self):
         """Test converting job to dictionary."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         job = Job(
             job_id="test-456",
             status=JobStatus.RUNNING,
@@ -176,7 +176,7 @@ class TestJob:
             status=JobStatus.FAILED,
             source="handbook",
             collection_name="handbook_documents",
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
             error="Something went wrong",
         )
 
@@ -245,7 +245,7 @@ class TestJobManager:
         mock_firestore, mock_db = self._create_mock_firestore()
         mock_doc = MagicMock()
         mock_doc.exists = True
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         mock_doc.to_dict.return_value = {
             "job_id": "test-job",
             "status": "running",
@@ -314,7 +314,7 @@ class TestJobManager:
                 status=JobStatus.PENDING,
                 source="handbook",
                 collection_name="handbook_documents",
-                started_at=datetime.now(timezone.utc),
+                started_at=datetime.now(UTC),
             )
 
             manager.mark_running(job)
@@ -340,7 +340,7 @@ class TestJobManager:
                 status=JobStatus.RUNNING,
                 source="handbook",
                 collection_name="handbook_documents",
-                started_at=datetime.now(timezone.utc),
+                started_at=datetime.now(UTC),
             )
             stats = JobStats(total_files=100, processed_files=100)
 
@@ -369,7 +369,7 @@ class TestJobManager:
                 status=JobStatus.RUNNING,
                 source="handbook",
                 collection_name="handbook_documents",
-                started_at=datetime.now(timezone.utc),
+                started_at=datetime.now(UTC),
             )
 
             manager.mark_failed(job, "Processing error")
@@ -385,7 +385,7 @@ class TestJobManager:
         # Create mock documents with proper to_dict methods
         def make_doc(job_id, status, source, collection_name):
             doc = MagicMock()
-            started_at = datetime.now(timezone.utc)
+            started_at = datetime.now(UTC)
             doc.to_dict.return_value = {
                 "job_id": job_id,
                 "status": status,

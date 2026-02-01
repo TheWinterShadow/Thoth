@@ -27,7 +27,7 @@ Example:
 
 from collections.abc import MutableMapping
 from contextvars import ContextVar
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 import logging
 import os
 import re
@@ -181,7 +181,7 @@ class GCPStructuredFormatter(jsonlogger_JsonFormatter):
         super().add_fields(log_record, record, message_dict)
 
         # === Standard Fields ===
-        log_record["timestamp"] = datetime.now(timezone.utc).isoformat()
+        log_record["timestamp"] = datetime.now(UTC).isoformat()
         log_record["severity"] = record.levelname
         log_record["logger"] = record.name
 

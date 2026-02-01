@@ -6,7 +6,7 @@ hooks for the ingestion pipeline and scheduled operations.
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 import json
 from pathlib import Path
@@ -51,7 +51,7 @@ class HealthCheck:
     name: str
     status: HealthStatus
     message: str
-    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -147,7 +147,7 @@ class Monitor:
         """Record the start of a sync operation (thread-safe)."""
         with self._lock:  # Protects metrics from concurrent scheduler/CLI updates
             self.metrics.sync_count += 1
-            self.metrics.last_sync_time = datetime.now(timezone.utc)
+            self.metrics.last_sync_time = datetime.now(UTC)
             self.logger.debug("Sync operation started")
 
     def record_sync_success(
@@ -183,7 +183,7 @@ class Monitor:
             self.metrics.sync_failure_count += 1
 
             error_info = {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "type": type(error).__name__,
                 "message": str(error),
             }
@@ -274,7 +274,7 @@ class Monitor:
 
         return {
             "overall_status": overall_status.value,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "checks": {name: check.to_dict() for name, check in health_checks.items()},
         }
 
@@ -310,7 +310,7 @@ class Monitor:
         """
         alert_info = {
             "type": alert_type,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "data": data,
         }
 

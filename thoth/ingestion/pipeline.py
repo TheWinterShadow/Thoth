@@ -513,10 +513,10 @@ class IngestionPipeline:
                 metadatas = [chunk.metadata.to_dict() for chunk in chunks]
                 ids = [chunk.metadata.chunk_id for chunk in chunks]
 
-                # Sanitize metadatas to ensure ChromaDB compatibility
+                # Sanitize metadatas to ensure LanceDB compatibility
                 # Convert any list values to comma-separated strings
                 def sanitize_metadata(meta: dict[str, Any]) -> dict[str, Any]:
-                    """Ensure all metadata values are ChromaDB-compatible (str, int, float, bool)."""
+                    """Ensure all metadata values are LanceDB-compatible (str, int, float, bool)."""
                     sanitized: dict[str, Any] = {}
                     for key, value in meta.items():
                         if isinstance(value, list):

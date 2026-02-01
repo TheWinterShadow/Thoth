@@ -184,7 +184,7 @@ class TaskQueueClient:
         Args:
             job_id: Job ID for tracking
             file_list: List of file paths to process
-            collection_name: Target ChromaDB collection
+            collection_name: Target LanceDB collection
             source: Source name (handbook, dnd, personal)
             batch_size: Number of files per batch
 

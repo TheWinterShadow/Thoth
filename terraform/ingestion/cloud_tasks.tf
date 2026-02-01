@@ -1,16 +1,16 @@
 # Cloud Tasks Configuration for Thoth MCP Server
 
-# Cloud Tasks queue for sequential ingestion
-# Note: max_concurrent_dispatches = 1 ensures only one batch runs at a time,
-# which is required for ChromaDB to maintain a single unified collection.
-# Parallel processing would create multiple collections that can't be merged.
+# Cloud Tasks queue for batch ingestion
+# Note: LanceDB supports parallel batch processing using isolated table prefixes.
+# Each batch writes to gs://bucket/lancedb_batch_X/ then merges to main table.
+# Set max_concurrent_dispatches = 1 for sequential, or 10-50 for parallel processing.
 resource "google_cloud_tasks_queue" "thoth_ingestion" {
   name     = "thoth-ingestion-queue-v2"
   location = var.region
   project  = var.project_id
 
   rate_limits {
-    max_concurrent_dispatches = 1  # Sequential processing for unified ChromaDB
+    max_concurrent_dispatches = 10  # TODO: Increase to 10-50 for parallel batch processing
     max_dispatches_per_second = 1
   }
 

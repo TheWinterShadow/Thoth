@@ -5,7 +5,7 @@ Tests the ThothMCPServer class and its handlers using unittest.TestCase.
 """
 
 import contextlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 import inspect
 from pathlib import Path
 import tempfile
@@ -1123,7 +1123,7 @@ class TestGetRecentUpdatesTools(unittest.IsolatedAsyncioTestCase):
         # Create mock commits
         mock_commit = MagicMock()
         mock_commit.hexsha = "abc123def456"
-        mock_commit.committed_date = datetime.now(timezone.utc).timestamp()
+        mock_commit.committed_date = datetime.now(UTC).timestamp()
         mock_commit.author.name = "Test Author"
         mock_commit.author.email = "test@example.com"
         mock_commit.message = "Test commit message"
@@ -1187,7 +1187,7 @@ class TestGetRecentUpdatesTools(unittest.IsolatedAsyncioTestCase):
         # Create mock commit with specific files
         mock_commit = MagicMock()
         mock_commit.hexsha = "abc123"
-        mock_commit.committed_date = datetime.now(timezone.utc).timestamp()
+        mock_commit.committed_date = datetime.now(UTC).timestamp()
         mock_commit.author.name = "Test"
         mock_commit.author.email = "test@test.com"
         mock_commit.message = "Update files"
@@ -1399,7 +1399,7 @@ class TestHelperMethods(unittest.IsolatedAsyncioTestCase):
         """Test _format_commit_details formatting."""
         mock_commit = MagicMock()
         mock_commit.hexsha = "abcdef1234567890"
-        mock_commit.committed_date = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc).timestamp()
+        mock_commit.committed_date = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC).timestamp()
         mock_commit.author.name = "Test Author"
         mock_commit.author.email = "test@example.com"
         mock_commit.message = "Test commit message"
@@ -1421,7 +1421,7 @@ class TestHelperMethods(unittest.IsolatedAsyncioTestCase):
         """Test _format_commit_details with >10 files."""
         mock_commit = MagicMock()
         mock_commit.hexsha = "abc123"
-        mock_commit.committed_date = datetime.now(timezone.utc).timestamp()
+        mock_commit.committed_date = datetime.now(UTC).timestamp()
         mock_commit.author.name = "Test"
         mock_commit.author.email = "test@test.com"
         mock_commit.message = "Many files"
@@ -1438,7 +1438,7 @@ class TestHelperMethods(unittest.IsolatedAsyncioTestCase):
         """Test _format_commit_details with empty commit message."""
         mock_commit = MagicMock()
         mock_commit.hexsha = "abc123"
-        mock_commit.committed_date = datetime.now(timezone.utc).timestamp()
+        mock_commit.committed_date = datetime.now(UTC).timestamp()
         mock_commit.author.name = "Test"
         mock_commit.author.email = "test@test.com"
         mock_commit.message = ""
@@ -1944,7 +1944,7 @@ class TestMCPHandlerIntegration(unittest.IsolatedAsyncioTestCase):
         """Test _format_commit_details with multiline commit message."""
         mock_commit = MagicMock()
         mock_commit.hexsha = "abc123def456"
-        mock_commit.committed_date = datetime.now(timezone.utc).timestamp()
+        mock_commit.committed_date = datetime.now(UTC).timestamp()
         mock_commit.author.name = "Test"
         mock_commit.author.email = "test@test.com"
         mock_commit.message = "First line\n\nSecond paragraph\nThird line"

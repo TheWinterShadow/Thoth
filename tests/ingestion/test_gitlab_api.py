@@ -1,6 +1,6 @@
 """Tests for GitLab API client."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 import os
 import time
 import unittest
@@ -66,7 +66,7 @@ class TestGitLabAPIClient(unittest.TestCase):
         response.status_code = 200
         response.headers = {
             "RateLimit-Remaining": "100",
-            "RateLimit-Reset": str(int((datetime.now(tz=timezone.utc) + timedelta(hours=1)).timestamp())),
+            "RateLimit-Reset": str(int((datetime.now(tz=UTC) + timedelta(hours=1)).timestamp())),
         }
         response.json.return_value = {"data": "test"}
         response.content = b'{"data": "test"}'
@@ -152,7 +152,7 @@ class TestGitLabAPIClient(unittest.TestCase):
         success_response.status_code = 200
         success_response.headers = {
             "RateLimit-Remaining": "100",
-            "RateLimit-Reset": str(int((datetime.now(tz=timezone.utc) + timedelta(hours=1)).timestamp())),
+            "RateLimit-Reset": str(int((datetime.now(tz=UTC) + timedelta(hours=1)).timestamp())),
         }
         success_response.json.return_value = {"data": "test"}
         success_response.content = b'{"data": "test"}'
@@ -230,7 +230,7 @@ class TestGitLabAPIClient(unittest.TestCase):
     def test_get_rate_limit_info(self):
         """Test get_rate_limit_info method."""
         self.client._rate_limit_remaining = 50
-        self.client._rate_limit_reset = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        self.client._rate_limit_reset = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
 
         info = self.client.get_rate_limit_info()
 

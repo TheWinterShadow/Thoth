@@ -25,7 +25,7 @@ Example:
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from fnmatch import fnmatch
 import os
 from pathlib import Path
@@ -1196,7 +1196,7 @@ class ThothMCPServer:
         ]
 
         # Format commit date
-        commit_date = datetime.fromtimestamp(commit.committed_date, tz=timezone.utc)
+        commit_date = datetime.fromtimestamp(commit.committed_date, tz=UTC)
         lines.append(f"Date: {commit_date.strftime('%Y-%m-%d %H:%M:%S UTC')}")
         lines.append(f"Author: {commit.author.name} <{commit.author.email}>")
 
@@ -1264,7 +1264,7 @@ class ThothMCPServer:
                 return repo
 
             # Calculate the date threshold
-            since_date = datetime.now(timezone.utc) - timedelta(days=days)
+            since_date = datetime.now(UTC) - timedelta(days=days)
 
             # Get commits since the date threshold
             commits = list(

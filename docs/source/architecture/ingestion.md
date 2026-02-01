@@ -72,22 +72,33 @@ sequenceDiagram
     participant Tasks as Cloud Tasks
     participant GCS
     participant Parsers as Parser Factory
-    participant ChromaDB
+    participant LanceDB
 
     Client->>Worker: POST /ingest {source: "handbook"}
     Worker->>Jobs: Create job (pending)
     Worker-->>Client: 202 Accepted {job_id}
-    Worker->>Jobs: Update job (running)
 
-    Worker->>GCS: List source files
-    Worker->>Parsers: Parse files (MD/PDF/TXT/DOCX)
-    Parsers-->>Worker: Parsed documents
-    Worker->>Worker: Chunk documents
-    Worker->>Worker: Generate embeddings
-    Worker->>LanceDB: Upsert vectors
+    Worker->>GCS: List files (no download)
+    Worker->>Jobs: Create sub-jobs for batches
+    Worker->>Tasks: Enqueue batches (100 files each)
 
+    par Parallel Batch Processing
+        Tasks->>Worker: POST /ingest-batch (batch 0-99)
+        Worker->>GCS: Download batch files (10 parallel)
+        Worker->>Parsers: Parse batch files
+        Parsers-->>Worker: Parsed documents
+        Worker->>Worker: Chunk + Embed
+        Worker->>LanceDB: Write to isolated table (lancedb_batch_0)
+        Worker->>Jobs: Mark sub-job completed
+    and
+        Tasks->>Worker: POST /ingest-batch (batch 100-199)
+        Worker->>LanceDB: Write to isolated table (lancedb_batch_1)
+    end
+
+    Client->>Worker: POST /merge-batches
+    Worker->>LanceDB: Merge all batch tables to main table
+    Worker->>GCS: Cleanup batch prefixes
     Worker->>Jobs: Update job (completed)
-    Worker->>GCS: Native storage (LanceDB on GCS)
 
     Client->>Worker: GET /jobs/{job_id}
     Worker->>Jobs: Get job status
@@ -185,17 +196,22 @@ Generates vector embeddings:
 
 ### Worker HTTP Server (`thoth/ingestion/worker.py`)
 
-Cloud Run service endpoints:
+Cloud Run service with modular flow endpoints (116 lines, refactored from 935):
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/health` | GET | Health check |
-| `/clone-handbook` | POST | Clone GitLab handbook to GCS |
-| `/ingest` | POST | Start ingestion job (returns job_id) |
-| `/ingest-batch` | POST | Process specific file batch |
-| `/merge-batches` | POST | Consolidate batch LanceDB tables |
-| `/jobs` | GET | List jobs (with filtering) |
-| `/jobs/{job_id}` | GET | Get job status |
+| Endpoint | Method | Flow Module | Description |
+|----------|--------|-------------|-------------|
+| `/health` | GET | `flows/health.py` | Health check |
+| `/clone-handbook` | POST | `flows/clone.py` | Clone GitLab handbook to GCS |
+| `/ingest` | POST | `flows/ingest.py` | List files, create sub-jobs, enqueue batches |
+| `/ingest-batch` | POST | `flows/batch.py` | Download batch, parse, chunk, embed, store |
+| `/merge-batches` | POST | `flows/merge.py` | Consolidate batch LanceDB tables to main |
+| `/jobs` | GET | `flows/job_status.py` | List jobs (with filtering) |
+| `/jobs/{job_id}` | GET | `flows/job_status.py` | Get job status with sub-jobs |
+
+**Singleton Services** (lazy-initialized in worker.py):
+- `SourceRegistry`: Multi-source config (handbook, dnd, personal)
+- `JobManager`: Firestore job tracking with sub-job aggregation
+- `TaskQueueClient`: Cloud Tasks batch distribution
 
 ## API Usage
 
@@ -284,10 +300,12 @@ flowchart TB
     T3 --> W3
 ```
 
-**Queue Configuration**:
-- Max concurrent dispatches: 10
-- Dispatch rate: 5 tasks/second
-- Retry policy: 3 attempts with exponential backoff (10-60s)
+**Queue Configuration** (terraform/ingestion/cloud_tasks.tf):
+- Max concurrent dispatches: 1 (sequential) - can be increased to 10-50 for parallel
+- Dispatch rate: 1-5 tasks/second
+- Retry policy: 5 attempts with exponential backoff (30-300s)
+- Batch isolation: Each batch writes to gs://bucket/lancedb_batch_X/
+- Idempotency: Skips processing if batch already exists in GCS
 
 ## Configuration
 

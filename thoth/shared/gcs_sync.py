@@ -1,12 +1,12 @@
 """Google Cloud Storage sync for vector database persistence.
 
 This module provides upload/download of local vector database directories
-(e.g., LanceDB or legacy ChromaDB data) to/from a GCS bucket for backup
+(e.g., LanceDB data) to/from a GCS bucket for backup
 and restore. Used by the ingestion worker and CLI when not using a direct
 gs:// LanceDB URI.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 import logging
 import os
 from pathlib import Path
@@ -33,7 +33,7 @@ class GCSSyncError(Exception):
 class GCSSync:
     """Manages sync of local vector DB directories to/from Google Cloud Storage.
 
-    Handles uploading a local directory (e.g., LanceDB or ChromaDB persistence
+    Handles uploading a local directory (e.g., LanceDB persistence
     path) to a GCS prefix and downloading it back for restore. Verifies bucket
     existence on init and uses Application Default Credentials or a provided
     credentials path.
@@ -88,7 +88,7 @@ class GCSSync:
     def upload_directory(
         self,
         local_path: str | Path,
-        gcs_prefix: str = "chroma_db",
+        gcs_prefix: str = "lancedb",
         exclude_patterns: list[str] | None = None,
     ) -> int:
         """Upload a local directory to GCS.
@@ -215,12 +215,12 @@ class GCSSync:
     def sync_to_gcs(
         self,
         local_path: str | Path,
-        gcs_prefix: str = "chroma_db",
+        gcs_prefix: str = "lancedb",
     ) -> dict[str, int | str]:
-        """Sync local ChromaDB directory to GCS (upload).
+        """Sync local LanceDB directory to GCS (upload).
 
         Args:
-            local_path: Path to local ChromaDB directory
+            local_path: Path to local LanceDB directory
             gcs_prefix: Prefix in GCS bucket
 
         Returns:
@@ -246,11 +246,11 @@ class GCSSync:
         local_path: str | Path,
         clean_local: bool = False,
     ) -> dict[str, int | str]:
-        """Sync ChromaDB directory from GCS to local (download).
+        """Sync LanceDB directory from GCS to local (download).
 
         Args:
             gcs_prefix: Prefix in GCS bucket
-            local_path: Path to local ChromaDB directory
+            local_path: Path to local LanceDB directory
             clean_local: If True, remove local directory before sync
 
         Returns:
@@ -278,7 +278,7 @@ class GCSSync:
         """Create a timestamped backup in GCS.
 
         Args:
-            local_path: Path to local ChromaDB directory
+            local_path: Path to local LanceDB directory
             backup_name: Optional backup name (defaults to timestamp)
 
         Returns:
@@ -288,7 +288,7 @@ class GCSSync:
             GCSSyncError: If backup fails
         """
         if backup_name is None:
-            timestamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
+            timestamp = datetime.now(tz=UTC).strftime("%Y%m%d_%H%M%S")
             backup_name = f"backup_{timestamp}"
 
         gcs_prefix = f"backups/{backup_name}"
@@ -305,11 +305,11 @@ class GCSSync:
         local_path: str | Path,
         clean_local: bool = True,
     ) -> int:
-        """Restore ChromaDB from a GCS backup.
+        """Restore LanceDB from a GCS backup.
 
         Args:
             backup_name: Name of the backup to restore
-            local_path: Path to local ChromaDB directory
+            local_path: Path to local LanceDB directory
             clean_local: If True, remove local directory before restore
 
         Returns:

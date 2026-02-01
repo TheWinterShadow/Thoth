@@ -11,7 +11,7 @@ Thoth is a modern Python library providing advanced utilities and tools for deve
 ## 🚀 Features
 
 - **Repository Management**: Clone and track GitLab handbook repository with automated updates
-- **Vector Database**: ChromaDB integration for storing and querying document embeddings with semantic search
+- **Vector Database**: LanceDB integration for storing and querying document embeddings with semantic search
 - **Cloud Storage**: Google Cloud Storage integration for vector DB persistence and backup
 - **Embedding Generation**: Efficient batch embedding generation using sentence-transformers models
 - **Cloud Deployment**: Ready-to-deploy to Google Cloud Run with automated deployment scripts
@@ -81,13 +81,12 @@ from thoth.shared.vector_store import VectorStore
 
 # Initialize the vector store (uses all-MiniLM-L6-v2 by default)
 vector_store = VectorStore(
-    persist_directory="./chroma_db",
+    persist_directory="./lancedb",
     collection_name="handbook_docs"
 )
 
-# Initialize with Google Cloud Storage backup (optional)
+# Initialize with Google Cloud Storage (LanceDB native GCS support)
 vector_store_with_gcs = VectorStore(
-    persist_directory="./chroma_db",
     collection_name="handbook_docs",
     gcs_bucket_name="thoth-storage-bucket",
     gcs_project_id="thoth-dev-485501"
@@ -108,12 +107,8 @@ results = vector_store.search_similar(
 )
 print(results["documents"])
 
-# Backup to Google Cloud Storage
-backup_name = vector_store_with_gcs.backup_to_gcs()
-print(f"Backup created: {backup_name}")
-
-# Restore from backup
-vector_store_with_gcs.restore_from_gcs(backup_name="backup_20260112_120000")
+# LanceDB with GCS uses native gs:// URIs (no backup needed)
+# Data is stored directly at gs://thoth-storage-bucket/lancedb/
 
 # Add documents with metadata for filtering
 vector_store.add_documents(
@@ -218,9 +213,10 @@ flowchart TB
 
     subgraph Ingestion["Ingestion Pipeline"]
         RepoMgr["Repo Manager<br/>(Git Clone/Pull)"]
+        GCSSync["GCS Repo Sync<br/>(File listing & batch downloads)"]
         Chunker["Markdown Chunker<br/>(500-1000 tokens)"]
         Embedder["Embedder<br/>(sentence-transformers)"]
-        VectorStore["Vector Store<br/>(ChromaDB)"]
+        VectorStore["Vector Store<br/>(LanceDB with GCS)"]
     end
 
     subgraph IaC["Infrastructure as Code"]
@@ -239,11 +235,13 @@ flowchart TB
     MCPServer --> VectorStore
 
     %% Cloud Tasks for parallel ingestion
-    CloudTasks -->|Dispatch Tasks| CloudRun
-    MCPServer -->|Enqueue Jobs| CloudTasks
+    CloudTasks -->|Dispatch Batch Tasks| CloudRun
+    MCPServer -->|Enqueue Batches| CloudTasks
 
     %% Ingestion pipeline flow
-    RepoMgr -->|Markdown Files| Chunker
+    RepoMgr -->|Clone to GCS| GCSSync
+    GCSSync -->|List Files| CloudTasks
+    GCSSync -->|Download Batch| Chunker
     Chunker -->|Text Chunks| Embedder
     Embedder -->|Embeddings| VectorStore
 
@@ -272,39 +270,29 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-    subgraph Ingestion["Data Ingestion Flow"]
+    subgraph Ingestion["Data Ingestion Flow (Parallel)"]
         direction TB
-        A1["1. Clone/Update<br/>GitLab Handbook"]
-        A2["2. Discover<br/>Markdown Files"]
-        A3["3. Load Pipeline State<br/>(Resume Support)"]
-        A4["4. Chunk Documents<br/>(500-1000 tokens)"]
-        A5["5. Generate Embeddings<br/>(all-MiniLM-L6-v2)"]
-        A6["6. Store in ChromaDB<br/>(Vector Database)"]
-        A7["7. Backup to GCS<br/>(Optional)"]
+        A1["1. POST /ingest<br/>(Create job)"]
+        A2["2. List files from GCS<br/>(No download)"]
+        A3["3. Create sub-jobs<br/>(Firestore tracking)"]
+        A4["4. Enqueue batches<br/>(Cloud Tasks)"]
+        A5["5. POST /ingest-batch<br/>(Parallel workers)"]
+        A6["6. Download batch files<br/>(10 parallel downloads)"]
+        A7["7. Chunk + Embed + Store<br/>(Isolated LanceDB table)"]
+        A8["8. POST /merge-batches<br/>(Consolidate results)"]
 
-        A1 --> A2 --> A3 --> A4 --> A5 --> A6 --> A7
+        A1 --> A2 --> A3 --> A4 --> A5 --> A6 --> A7 --> A8
     end
 
-    subgraph Query["Query Flow"]
+    subgraph Query["Query Flow (MCP)"]
         direction TB
         B1["1. User Query<br/>(Natural Language)"]
         B2["2. Check LRU Cache<br/>(100 entries)"]
         B3["3. Generate Query<br/>Embedding"]
-        B4["4. Vector Similarity<br/>Search (Cosine)"]
+        B4["4. LanceDB Similarity<br/>Search (L2 distance)"]
         B5["5. Return Results<br/>+ Metadata"]
 
         B1 --> B2 --> B3 --> B4 --> B5
-    end
-
-    subgraph Parallel["Parallel Ingestion Flow (Cloud Tasks)"]
-        direction TB
-        C1["1. Trigger Ingestion<br/>(API or Schedule)"]
-        C2["2. Enqueue File Batches<br/>(100 files/batch)"]
-        C3["3. Cloud Tasks Dispatch<br/>(10 concurrent, 5/sec)"]
-        C4["4. Parallel Processing<br/>(Chunk + Embed)"]
-        C5["5. Merge Results<br/>to ChromaDB"]
-
-        C1 --> C2 --> C3 --> C4 --> C5
     end
 ```
 
@@ -371,7 +359,7 @@ sequenceDiagram
     participant MCP as MCP Server
     participant VS as Vector Store
     participant Emb as Embedder
-    participant DB as ChromaDB
+    participant DB as LanceDB
 
     User->>HTTP: MCP Request (SSE)
     HTTP->>MCP: search_handbook(query)
@@ -380,8 +368,8 @@ sequenceDiagram
         MCP->>Emb: embed_single(query)
         Emb-->>MCP: Query Embedding (384-dim)
         MCP->>VS: search_similar(embedding)
-        VS->>DB: Cosine Similarity Search
-        DB-->>VS: Top K Results
+        VS->>DB: L2 Distance Search
+        DB-->>VS: Top K Results (sorted)
         VS-->>MCP: Documents + Metadata
         MCP->>MCP: Update Cache
     end
@@ -399,7 +387,7 @@ sequenceDiagram
     participant Worker as Task Worker
     participant Repo as Repo Manager
     participant Emb as Embedder
-    participant DB as ChromaDB
+    participant DB as LanceDB
     participant GCS as Cloud Storage
 
     API->>MCP: POST /ingest (trigger)
@@ -425,8 +413,8 @@ sequenceDiagram
         CT->>Worker: Dispatch Task N...
     end
 
-    MCP->>GCS: Backup ChromaDB
-    GCS-->>MCP: Backup complete
+    MCP->>DB: Merge batches to main table
+    DB-->>MCP: Merge complete
     MCP-->>API: Ingestion complete
 ```
 

@@ -90,12 +90,11 @@ class TestWorkerCloudTasksIntegration:
             main()
 
     @pytest.mark.asyncio
-    @patch("thoth.ingestion.worker.IngestionPipeline")
-    async def test_pipeline_integration(self, mock_pipeline):
-        """Test worker integrates with IngestionPipeline."""
+    async def test_pipeline_integration(self):
+        """Test worker can be initialized and started."""
         with (
             patch("thoth.ingestion.worker.uvicorn"),
             patch("thoth.ingestion.worker.Starlette"),
         ):
             main()
-            # Worker should be ready to use IngestionPipeline
+            # Worker should start successfully

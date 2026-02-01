@@ -5,15 +5,47 @@ operations using Google Cloud Firestore as the backend.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 import os
 from typing import Any
+import urllib.parse
 import uuid
 
 from thoth.shared.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
+
+
+def get_job_logs_url(
+    job_id: str,
+    project_id: str | None = None,
+    service_name: str = "thoth-ingestion-worker",
+) -> str:
+    """Generate Cloud Logging URL for a specific job.
+
+    Args:
+        job_id: Job identifier to filter logs
+        project_id: GCP project ID (defaults to environment variable)
+        service_name: Cloud Run service name
+
+    Returns:
+        URL to view logs in GCP Console
+    """
+    project = project_id or os.getenv("GCP_PROJECT_ID", "thoth-dev-485501")
+
+    # Build log filter query
+    filter_parts = [
+        'resource.type="cloud_run_revision"',
+        f'resource.labels.service_name="{service_name}"',
+        f'jsonPayload.job_id="{job_id}"',
+    ]
+    filter_query = "\n".join(filter_parts)
+
+    # URL encode the filter
+    encoded_filter = urllib.parse.quote(filter_query)
+
+    return f"https://console.cloud.google.com/logs/query;query={encoded_filter}?project={project}"
 
 
 class JobStatus(Enum):
@@ -73,7 +105,7 @@ class Job:
         job_id: Unique job identifier (UUID or parent_id_NNNN for sub-jobs)
         status: Current job status
         source: Source identifier (e.g., 'handbook', 'dnd')
-        collection_name: Target ChromaDB collection
+        collection_name: Target LanceDB collection
         started_at: Job start timestamp
         completed_at: Job completion timestamp (if finished)
         stats: Job statistics
@@ -108,6 +140,7 @@ class Job:
             "completed_at": (self.completed_at.isoformat() if self.completed_at else None),
             "stats": self.stats.to_dict(),
             "error": self.error,
+            "logs_url": get_job_logs_url(self.job_id),
         }
         # Only include batch fields if relevant
         if self.parent_job_id is not None:
@@ -190,7 +223,9 @@ class JobManager:
                 from google.cloud import firestore  # type: ignore[attr-defined]  # noqa: PLC0415
 
                 self._db = firestore.Client(project=self._project_id)
-                self._collection = self._db.collection(self.COLLECTION_NAME)  # type: ignore[attr-defined]
+                self._collection = self._db.collection(  # type: ignore[attr-defined]
+                    self.COLLECTION_NAME
+                )
                 logger.info(
                     "Initialized JobManager with Firestore (project: %s)",
                     self._project_id,
@@ -215,7 +250,7 @@ class JobManager:
 
         Args:
             source: Source identifier (e.g., 'handbook', 'dnd')
-            collection_name: Target ChromaDB collection
+            collection_name: Target LanceDB collection
             total_batches: Number of batches (for parent jobs with sub-jobs)
 
         Returns:
@@ -226,7 +261,7 @@ class JobManager:
             status=JobStatus.PENDING,
             source=source,
             collection_name=collection_name,
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
             total_batches=total_batches,
         )
 
@@ -260,7 +295,7 @@ class JobManager:
             status=JobStatus.PENDING,
             source=parent_job.source,
             collection_name=parent_job.collection_name,
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
             parent_job_id=parent_job.job_id,
             batch_index=batch_index,
             stats=JobStats(total_files=total_files),
@@ -316,7 +351,7 @@ class JobManager:
             stats: Optional final statistics
         """
         job.status = JobStatus.COMPLETED
-        job.completed_at = datetime.now(timezone.utc)
+        job.completed_at = datetime.now(UTC)
         if stats:
             job.stats = stats
         self.update_job(job)
@@ -334,7 +369,7 @@ class JobManager:
             error: Error message describing the failure
         """
         job.status = JobStatus.FAILED
-        job.completed_at = datetime.now(timezone.utc)
+        job.completed_at = datetime.now(UTC)
         job.error = error
         self.update_job(job)
         logger.error("Job %s failed: %s", job.job_id, error)
@@ -403,7 +438,7 @@ class JobManager:
         Returns:
             Number of jobs deleted
         """
-        cutoff = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        cutoff = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
         cutoff = cutoff.replace(day=cutoff.day - days)
 
         # Query old jobs
@@ -483,6 +518,7 @@ class JobManager:
                         "status": sub_job.status.value,
                         "stats": sub_job.stats.to_dict(),
                         "error": sub_job.error,
+                        "logs_url": get_job_logs_url(sub_job.job_id),
                     }
                 )
 
@@ -536,7 +572,7 @@ class JobManager:
                 # Check if all batches are done
                 if parent_job.total_batches and parent_job.completed_batches >= parent_job.total_batches:
                     parent_job.status = JobStatus.COMPLETED
-                    parent_job.completed_at = datetime.now(timezone.utc)
+                    parent_job.completed_at = datetime.now(UTC)
                     logger.info(
                         "Parent job %s completed: all %d batches done",
                         parent_job.job_id,
@@ -573,7 +609,7 @@ class JobManager:
                 if parent_job.total_batches and parent_job.completed_batches >= parent_job.total_batches:
                     # If any batch failed, mark parent as failed too
                     parent_job.status = JobStatus.FAILED
-                    parent_job.completed_at = datetime.now(timezone.utc)
+                    parent_job.completed_at = datetime.now(UTC)
                     parent_job.error = f"One or more batches failed. Last error: {error}"
                     logger.error(
                         "Parent job %s failed: batch %s failed",

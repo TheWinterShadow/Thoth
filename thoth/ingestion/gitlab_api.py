@@ -1,6 +1,6 @@
 """GitLab API client with rate limiting, caching, and error handling."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 import logging
 import os
 import time
@@ -48,11 +48,11 @@ class CacheEntry:
             ttl: Time to live in seconds
         """
         self.data = data
-        self.expires_at = datetime.now(tz=timezone.utc) + timedelta(seconds=ttl)
+        self.expires_at = datetime.now(tz=UTC) + timedelta(seconds=ttl)
 
     def is_expired(self) -> bool:
         """Check if cache entry is expired."""
-        return datetime.now(tz=timezone.utc) > self.expires_at
+        return datetime.now(tz=UTC) > self.expires_at
 
 
 class GitLabAPIClient:
@@ -207,7 +207,7 @@ class GitLabAPIClient:
 
         if "RateLimit-Reset" in headers:
             reset_timestamp = int(headers["RateLimit-Reset"])
-            self._rate_limit_reset = datetime.fromtimestamp(reset_timestamp, tz=timezone.utc)
+            self._rate_limit_reset = datetime.fromtimestamp(reset_timestamp, tz=UTC)
             self.logger.debug(f"Rate limit resets at: {self._rate_limit_reset}")
 
     def _check_rate_limit(self) -> None:
@@ -221,7 +221,7 @@ class GitLabAPIClient:
             and self._rate_limit_remaining < RATE_LIMIT_MARGIN
             and self._rate_limit_reset
         ):
-            wait_time = (self._rate_limit_reset - datetime.now(tz=timezone.utc)).total_seconds()
+            wait_time = (self._rate_limit_reset - datetime.now(tz=UTC)).total_seconds()
             if wait_time > 0:
                 self.logger.warning(MSG_RATE_LIMIT_EXCEEDED.format(wait_time=wait_time))
                 time.sleep(wait_time + 1)  # Add 1 second buffer

@@ -73,3 +73,4 @@ handbook_vectors/
 benchmark_embeddings.py
 auth/
 :memory:/
+local_vector_cli.py
