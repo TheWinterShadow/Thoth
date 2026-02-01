@@ -222,7 +222,7 @@ class TaskQueueClient:
                 end_index=end_index,
                 collection_name=collection_name,
                 source=source,
-                # Pass file slice for this batch
+                # Pass only the slice for this batch (already sliced)
                 file_list=file_list[start_index:end_index],
             )
 

@@ -362,26 +362,26 @@ class IngestionPipeline:
         """Process a specific batch of files by index range.
 
         Args:
-            start_index: Starting index (inclusive)
-            end_index: Ending index (exclusive)
-            file_list: Optional pre-computed file list. If None, discovers files.
+            start_index: Starting index in original full file list (for tracking/logging)
+            end_index: Ending index in original full file list (for tracking/logging)
+            file_list: Pre-sliced file list for this batch. If None, discovers and slices.
 
         Returns:
             Statistics dictionary with processed/failed counts
         """
         self.logger.info("Processing batch %d-%d of files", start_index, end_index)
 
-        # Get file list if not provided
+        # Get file list and slice if not provided
         if file_list is None:
-            file_list = self.get_file_list()
-
-        # Validate indices
-        if start_index < 0 or end_index > len(file_list) or start_index >= end_index:
-            msg = f"Invalid batch range: {start_index}-{end_index} for {len(file_list)} files"
-            raise ValueError(msg)
-
-        # Get batch slice
-        batch_files = file_list[start_index:end_index]
+            # Local/direct processing: discover files and slice by indices
+            full_file_list = self.get_file_list()
+            if start_index < 0 or end_index > len(full_file_list) or start_index >= end_index:
+                msg = f"Invalid batch range: {start_index}-{end_index} for {len(full_file_list)} files"
+                raise ValueError(msg)
+            batch_files = full_file_list[start_index:end_index]
+        else:
+            # Cloud Tasks: file_list is already pre-sliced for this batch
+            batch_files = file_list
 
         # Determine repo path and download files if using GCS
         if self.gcs_repo_sync:
