@@ -7,7 +7,7 @@ end-to-end ingestion workflow with progress tracking, error handling, and resume
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 import json
 import logging
 import os
@@ -251,7 +251,7 @@ class IngestionPipeline:
 
     def _save_state(self) -> None:
         """Save current pipeline state to disk."""
-        self.state.last_update_time = datetime.now(timezone.utc).isoformat()
+        self.state.last_update_time = datetime.now(UTC).isoformat()
 
         try:
             self.state_file.parent.mkdir(parents=True, exist_ok=True)
@@ -383,22 +383,22 @@ class IngestionPipeline:
         # Get batch slice
         batch_files = file_list[start_index:end_index]
 
-        # Determine repo path (GCS sync or local clone)
+        # Determine repo path and download files if using GCS
         if self.gcs_repo_sync:
-            # Ensure synced before processing
-            if not self.gcs_repo_sync.is_synced():
-                self.gcs_repo_sync.sync_to_local()
-            repo_path = self.gcs_repo_sync.get_local_path()
+            # Download ONLY the files in this batch (parallel downloads)
+            self.logger.info("Downloading %d files from GCS for this batch", len(batch_files))
+            repo_path = self.gcs_repo_sync.download_batch_files(batch_files)
         else:
+            # Use local clone for development/testing
             repo_path = self.repo_manager.clone_path
 
         # Convert to Path objects
         file_paths = [repo_path / f for f in batch_files]
 
         # Process the batch
-        start_time = datetime.now(timezone.utc)
+        start_time = datetime.now(UTC)
         successful, failed = self._process_batch(file_paths)
-        end_time = datetime.now(timezone.utc)
+        end_time = datetime.now(UTC)
 
         duration = (end_time - start_time).total_seconds()
 
@@ -727,7 +727,7 @@ class IngestionPipeline:
         Raises:
             RuntimeError: If pipeline fails
         """
-        start_time = datetime.now(timezone.utc)
+        start_time = datetime.now(UTC)
         self.state.start_time = start_time.isoformat()
         self.logger.info("Starting ingestion pipeline")
 
@@ -942,7 +942,7 @@ class IngestionPipeline:
                 progress_callback(100, 100, "Pipeline complete!")
 
             # Calculate statistics
-            end_time = datetime.now(timezone.utc)
+            end_time = datetime.now(UTC)
             duration = (end_time - start_time).total_seconds()
 
             total_files_processed = (

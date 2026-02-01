@@ -5,6 +5,7 @@ This module handles syncing the GitLab handbook between GCS and local storage:
 2. Sync from GCS to local /tmp on Cloud Run startup
 """
 
+from concurrent.futures import ThreadPoolExecutor
 import logging
 from pathlib import Path
 import shutil
@@ -171,6 +172,62 @@ class GCSRepoSync:
             "files_downloaded": downloaded,
             "local_path": str(self.local_path),
         }
+
+    def list_files_in_gcs(self) -> list[str]:
+        """List all files in GCS without downloading.
+
+        Returns:
+            List of relative file paths (e.g., ['docs/setup.md', 'api/README.md'])
+        """
+        self.logger.info("Listing files in GCS bucket: %s/%s", self.bucket_name, self.gcs_prefix)
+        blobs = self.bucket.list_blobs(prefix=f"{self.gcs_prefix}/")
+        files = []
+
+        for blob in blobs:
+            # Skip directory markers
+            if blob.name.endswith("/"):
+                continue
+
+            # Remove prefix to get relative path
+            relative_path = blob.name[len(self.gcs_prefix) + 1 :]
+            files.append(relative_path)
+
+        self.logger.info("Found %d files in GCS", len(files))
+        return files
+
+    def download_batch_files(self, file_list: list[str]) -> Path:
+        """Download only specific files for a batch from GCS.
+
+        Uses parallel downloads (ThreadPoolExecutor) for faster performance.
+
+        Args:
+            file_list: List of relative file paths to download
+
+        Returns:
+            Path to local directory with downloaded files
+        """
+        self.logger.info("Downloading %d files for batch processing", len(file_list))
+
+        # Create local directory if it doesn't exist
+        self.local_path.mkdir(parents=True, exist_ok=True)
+
+        def download_file(relative_path: str) -> None:
+            """Download a single file from GCS."""
+            blob = self.bucket.blob(f"{self.gcs_prefix}/{relative_path}")
+            local_file = self.local_path / relative_path
+
+            # Create parent directories
+            local_file.parent.mkdir(parents=True, exist_ok=True)
+
+            # Download file
+            blob.download_to_filename(str(local_file))
+
+        # Download files in parallel (10 workers for good throughput)
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            list(executor.map(download_file, file_list))
+
+        self.logger.info("Successfully downloaded %d files for batch", len(file_list))
+        return self.local_path
 
     def get_local_path(self) -> Path:
         """Get the local path where repository is synced.

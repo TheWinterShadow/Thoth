@@ -261,35 +261,30 @@ async def _run_ingestion_job(job: Job, source_config: SourceConfig, params: dict
             logger_instance=job_logger,
         )
 
-        # Step 1: Sync repository from GCS
+        # Step 1: List files from GCS (fast operation - no downloading)
         force: bool = params.get("force", False)
 
         gcs_sync = pipeline.gcs_repo_sync
         if gcs_sync:
-            job_logger.info("Syncing repository from GCS...")
-            # Run blocking GCS sync in thread pool so the event loop stays responsive.
-            sync_result = await asyncio.get_event_loop().run_in_executor(
+            job_logger.info("Listing files from GCS bucket...")
+            # List files directly from GCS without downloading
+            file_list = await asyncio.get_event_loop().run_in_executor(
                 None,
-                lambda: gcs_sync.sync_to_local(force=force),
+                gcs_sync.list_files_in_gcs,
             )
             job_logger.info(
-                "GCS sync complete",
+                "File listing complete",
                 extra={
-                    "status": sync_result.get("status"),
-                    "files": sync_result.get("files_downloaded", sync_result.get("file_count")),
+                    "total_files": len(file_list),
                 },
             )
         else:
-            job_logger.error("GCS sync not configured - cannot proceed without repository data")
-            job_manager.mark_failed(job, "GCS sync not configured")
-            return
-
-        # Step 2: Get file list (run in executor to avoid blocking the event loop).
-        job_logger.info("Discovering files to process...")
-        file_list = await asyncio.get_event_loop().run_in_executor(
-            None,
-            pipeline.get_file_list,
-        )
+            # Fallback to local repo manager for development/testing
+            job_logger.info("GCS not configured, discovering files from local repository...")
+            file_list = await asyncio.get_event_loop().run_in_executor(
+                None,
+                pipeline.get_file_list,
+            )
 
         if not file_list:
             job_logger.warning("No files found to process")
