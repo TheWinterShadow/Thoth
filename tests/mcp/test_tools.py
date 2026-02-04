@@ -166,10 +166,10 @@ class TestGetVectorStore(unittest.TestCase):
         # Reset global state
         tools_module._vector_store = None
 
-        mock_getenv.side_effect = lambda key: {
+        mock_getenv.side_effect = {
             "GCS_BUCKET_NAME": "test-bucket",
             "GCP_PROJECT_ID": "test-project",
-        }.get(key)
+        }.get
 
         mock_store = MagicMock()
         mock_store.get_document_count.return_value = 10
