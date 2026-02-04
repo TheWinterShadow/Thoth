@@ -7,6 +7,7 @@ Add new tools here to extend the MCP server capabilities.
 import os
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from thoth.shared.utils.logger import setup_logger
 from thoth.shared.vector_store import VectorStore
@@ -14,7 +15,12 @@ from thoth.shared.vector_store import VectorStore
 logger = setup_logger(__name__)
 
 # Initialize FastMCP instance
-mcp = FastMCP("ThothHandbookServer")
+# DNS rebinding protection is disabled because Cloud Run handles
+# authentication and authorization via IAM identity tokens.
+mcp = FastMCP(
+    "ThothHandbookServer",
+    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+)
 
 # Global vector store (initialized lazily)
 _vector_store: VectorStore | None = None
