@@ -187,11 +187,14 @@ class IngestionPipeline:
             # Cloud Run: use GCS for repository storage
             self.logger.info("Cloud Run detected - using GCS for repository sync")
             repo_url = os.getenv("GITLAB_BASE_URL", "https://gitlab.com") + "/gitlab-com/content-sites/handbook.git"
+            # Use source-specific GCS prefix and local path
+            gcs_prefix = source_config.gcs_prefix if source_config else "handbook"
+            local_path_name = source_config.name if source_config else "handbook"
             self.gcs_repo_sync = GCSRepoSync(
                 bucket_name=gcs_bucket,
                 repo_url=repo_url,
-                gcs_prefix="handbook",
-                local_path=Path("/tmp/handbook"),  # nosec B108 - Cloud Run requires /tmp
+                gcs_prefix=gcs_prefix,
+                local_path=Path(f"/tmp/{local_path_name}"),  # nosec B108 - Cloud Run requires /tmp
                 logger_instance=self.logger,
             )
 
