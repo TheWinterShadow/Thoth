@@ -110,9 +110,15 @@ async def ingest(request: Request) -> JSONResponse:
 
 async def _discover_files_from_gcs(
     gcs_bucket: str,
+    source_config: SourceConfig,
     job_logger: Any,
 ) -> list[str]:
     """Discover files from GCS bucket.
+
+    Args:
+        gcs_bucket: GCS bucket name
+        source_config: Source configuration with gcs_prefix
+        job_logger: Logger instance for job correlation
 
     Returns:
         List of file paths in GCS
@@ -121,8 +127,8 @@ async def _discover_files_from_gcs(
     gcs_sync = GCSRepoSync(
         bucket_name=gcs_bucket,
         repo_url=repo_url,
-        gcs_prefix="handbook",
-        local_path=Path("/tmp/handbook"),  # nosec B108
+        gcs_prefix=source_config.gcs_prefix,
+        local_path=Path(f"/tmp/{source_config.name}"),  # nosec B108
         logger_instance=job_logger,
     )
     job_logger.info("Listing files from GCS bucket...")
@@ -286,7 +292,7 @@ async def _run_ingestion_job(job: Job, source_config: SourceConfig, params: dict
         gcs_project = os.getenv("GCP_PROJECT_ID")
 
         if gcs_bucket and gcs_project:
-            file_list = await _discover_files_from_gcs(gcs_bucket, job_logger)
+            file_list = await _discover_files_from_gcs(gcs_bucket, source_config, job_logger)
         else:
             file_list = await _discover_files_locally(source_config, job_logger)
 
