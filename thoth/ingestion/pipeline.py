@@ -194,7 +194,9 @@ class IngestionPipeline:
                 bucket_name=gcs_bucket,
                 repo_url=repo_url,
                 gcs_prefix=gcs_prefix,
-                local_path=Path(f"/tmp/{local_path_name}"),  # nosec B108 - Cloud Run requires /tmp
+                local_path=Path(
+                    f"/tmp/{local_path_name}"  # nosec B108 - Cloud Run requires /tmp
+                ),
                 logger_instance=self.logger,
             )
 
