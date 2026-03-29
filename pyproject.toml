@@ -82,9 +82,7 @@ dev = [
 
 # Documentation dependencies
 docs = [
-  "sphinx>=9.0.4",
-  "furo>=2025.12.19",
-  "myst-parser>=4.0.0",
+  "zensical",
 ]
 
 # All optional dependencies combined
@@ -97,9 +95,7 @@ all = [
   "pytest-asyncio>=1.3.0",
   "bandit>=1.9.3",
   "pre-commit>=4.0.0",
-  "sphinx>=9.0.4",
-  "furo>=2025.12.19",
-  "myst-parser>=4.0.0",
+  "zensical",
   "mcp>=1.26.0",
   "httpx>=0.28.1",
   "types-requests>=2.32.4",
@@ -145,9 +141,7 @@ dependencies = [
 dependencies = [
   # Core dependencies (needed for type checking)
   # Documentation
-  "sphinx>=9.0.4",
-  "furo>=2025.12.19",
-  "myst-parser>=4.0.0",
+  "zensical",
   # Type stubs for better IDE support and mypy
   "types-requests>=2.32.4",
 
@@ -192,11 +186,7 @@ precommit = [
 
 [tool.hatch.envs.docs]
 dependencies = [
-  "sphinx>=9.0.4",
-  "shibuya",
-  "myst-parser>=4.0.0",
-  "sphinxcontrib-mermaid",
-  "sphinxcontrib-redoc",
+  "zensical",
 ]
 
 [tool.hatch.envs.dev.scripts]
@@ -292,9 +282,9 @@ build = "hatch build"
 clean = "hatch clean"
 
 [tool.hatch.envs.docs.scripts]
-build = "sphinx-build -b html docs/source docs/build"
-clean = "sphinx-build -b html -E docs/source docs/build"
-serve = "python -m http.server 8000 --directory docs/build"
+build = "zensical build"
+clean = "rm -rf site"
+serve = "zensical serve"
 
 
 

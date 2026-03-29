@@ -1,0 +1,177 @@
+[project]
+site_name = "Thoth"
+site_url = "https://thoth.thewintershadow.com"
+site_description = "MCP server enabling semantic search over documentation repositories."
+site_author = "TheWinterShadow"
+copyright = "Copyright &copy; 2026 TheWinterShadow &mdash; MIT License"
+docs_dir = "docs"
+site_dir = "site"
+
+repo_name = "TheWinterShadow/Thoth"
+repo_url = "https://github.com/TheWinterShadow/Thoth"
+edit_uri = "edit/main/docs/"
+
+nav = [
+  { "🏠 Home" = "index.md" },
+  { "📚 API Reference" = [
+    { "Shared" = [
+      { "CLI" = "api/shared/cli.md" },
+      { "Vector Store" = "api/shared/vector_store.md" },
+      { "Health" = "api/shared/health.md" },
+      { "Monitoring" = "api/shared/monitoring.md" },
+      { "Scheduler" = "api/shared/scheduler.md" },
+      { "Embedder" = "api/shared/embedder.md" },
+      { "GCS Sync" = "api/shared/gcs_sync.md" },
+      { "Utils" = [
+        { "Logger" = "api/shared/utils/logger.md" },
+        { "Secrets" = "api/shared/utils/secrets.md" }
+      ]},
+      { "Sources" = [
+        { "Config" = "api/shared/sources/config.md" }
+      ]}
+    ]},
+    { "Ingestion" = [
+      { "Worker" = "api/ingestion/worker.md" },
+      { "Task Queue" = "api/ingestion/task_queue.md" },
+      { "Chunker" = "api/ingestion/chunker.md" },
+      { "Repo Manager" = "api/ingestion/repo_manager.md" },
+      { "Job Manager" = "api/ingestion/job_manager.md" },
+      { "Gitlab API" = "api/ingestion/gitlab_api.md" },
+      { "Singletons" = "api/ingestion/singletons.md" },
+      { "Pipeline" = "api/ingestion/pipeline.md" },
+      { "GCS Repo Sync" = "api/ingestion/gcs_repo_sync.md" },
+      { "Parsers" = [
+        { "Base" = "api/ingestion/parsers/base.md" },
+        { "Docx" = "api/ingestion/parsers/docx.md" },
+        { "Markdown" = "api/ingestion/parsers/markdown.md" },
+        { "PDF" = "api/ingestion/parsers/pdf.md" },
+        { "Text" = "api/ingestion/parsers/text.md" }
+      ]},
+      { "Flows" = [
+        { "Batch" = "api/ingestion/flows/batch.md" },
+        { "Clone" = "api/ingestion/flows/clone.md" },
+        { "Health" = "api/ingestion/flows/health.md" },
+        { "Ingest" = "api/ingestion/flows/ingest.md" },
+        { "Job Status" = "api/ingestion/flows/job_status.md" },
+        { "Merge" = "api/ingestion/flows/merge.md" }
+      ]}
+    ]},
+    { "MCP" = [
+      { "Server" = "api/mcp/server.md" },
+      { "Tools" = "api/mcp/tools.md" }
+    ]}
+  ]}
+]
+
+# ── Markdown extensions ──────────────────────────────────────────────────────
+
+[project.markdown_extensions.abbr]
+[project.markdown_extensions.admonition]
+[project.markdown_extensions.attr_list]
+[project.markdown_extensions.def_list]
+[project.markdown_extensions.footnotes]
+[project.markdown_extensions.md_in_html]
+
+[project.markdown_extensions.toc]
+permalink = true
+
+[project.markdown_extensions.pymdownx.betterem]
+smart_enable = "all"
+
+[project.markdown_extensions.pymdownx.caret]
+[project.markdown_extensions.pymdownx.details]
+
+[project.markdown_extensions.pymdownx.emoji]
+emoji_generator = "zensical.extensions.emoji.to_svg"
+emoji_index     = "zensical.extensions.emoji.twemoji"
+
+[project.markdown_extensions.pymdownx.highlight]
+anchor_linenums     = true
+line_spans          = "__span"
+pygments_lang_class = true
+
+[project.markdown_extensions.pymdownx.inlinehilite]
+[project.markdown_extensions.pymdownx.keys]
+[project.markdown_extensions.pymdownx.mark]
+[project.markdown_extensions.pymdownx.smartsymbols]
+[project.markdown_extensions.pymdownx.snippets]
+
+[project.markdown_extensions.pymdownx.superfences]
+custom_fences = [
+  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
+]
+
+[project.markdown_extensions.pymdownx.tabbed]
+alternate_style = true
+
+[project.markdown_extensions.pymdownx.tasklist]
+custom_checkbox = true
+
+[project.markdown_extensions.pymdownx.tilde]
+
+[project.plugins.search]
+[project.plugins.autorefs]
+
+[project.plugins.mkdocstrings.handlers.python]
+paths = ["."]
+[project.plugins.mkdocstrings.handlers.python.options]
+docstring_style = "google"
+show_source = false
+show_root_heading = true
+show_signature_annotations = true
+show_if_no_docstring = true
+members_order = "source"
+show_bases = false
+
+# ── Theme ────────────────────────────────────────────────────────────────────
+
+[project.theme]
+name = "material"
+features = [
+  "navigation.instant",
+  "navigation.instant.prefetch",
+  "navigation.instant.progress",
+  "navigation.tracking",
+  "navigation.tabs",
+  "navigation.tabs.sticky",
+  "navigation.sections",
+  "navigation.path",
+  "navigation.indexes",
+  "navigation.top",
+  "navigation.footer",
+  "search.highlight",
+  "search.share",
+  "search.suggest",
+  "content.code.annotate",
+  "content.code.copy",
+  "content.code.select",
+  "content.tabs.link",
+  "toc.follow",
+]
+
+[project.theme.icon]
+logo = "fontawesome/solid/book"
+repo = "fontawesome/brands/github"
+edit = "lucide/pencil"
+view = "lucide/eye"
+
+[[project.theme.palette]]
+media       = "(prefers-color-scheme: light)"
+scheme      = "default"
+primary     = "teal"
+accent      = "teal"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+media       = "(prefers-color-scheme: dark)"
+scheme      = "slate"
+primary     = "teal"
+accent      = "teal"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to light mode"
+
+[[project.extra.social]]
+icon = "fontawesome/brands/github"
+link = "https://github.com/TheWinterShadow/Thoth"
+name = "GitHub"
